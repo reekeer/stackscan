@@ -120,6 +120,10 @@ dmypy.json
 # Codex / Claude
 AGENTS.md
 
+# Local frameworks
+frameworks.json
+frameworks.schema.json
+
 # OS generated files
 .DS_Store
 .DS_Store?
