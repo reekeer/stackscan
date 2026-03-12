@@ -4,29 +4,23 @@ build-backend = "hatchling.build"
 
 [project]
 name = "stackscan"
-dynamic = ["version"]
-
 description = "Stackscan - lightweight Wappalyzer-like stack detector."
 readme = "README.md"
-requires-python = ">=3.10"
-
 license = { text = "MIT" }
+requires-python = ">=3.10"
+dynamic = ["version"]
 
 authors = [
   { name = "reekeer team" }
 ]
-
 maintainers = [
   { name = "delewer", email = "del@reekeer.hidden" }
 ]
 
-keywords = [
-  "wappalyzer",
-  "stack",
-  "osint",
-  "fingerprinting",
-  "tech",
-  "cli"
+dependencies = [
+  "rich>=13.7",
+  "pydantic>=2.0",
+  "aiohttp>=3.9"
 ]
 
 classifiers = [
@@ -41,10 +35,13 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 
-dependencies = [
-  "rich>=13.7",
-  "pydantic>=2.0",
-  "aiohttp>=3.9"
+keywords = [
+  "wappalyzer",
+  "stack",
+  "osint",
+  "fingerprinting",
+  "tech",
+  "cli"
 ]
 
 [project.optional-dependencies]
@@ -86,9 +83,7 @@ line-length = 100
 target-version = ["py310"]
 
 include = '\.pyi?$'
-
 exclude = '/(\.git|\.venv|venv|build|dist|__pycache__)/'
-
 
 [tool.ruff]
 line-length = 100
@@ -111,7 +106,6 @@ select = [
   "UP",
   "N"
 ]
-
 ignore = [
   "E501"
 ]
@@ -122,7 +116,6 @@ combine-as-imports = true
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
-
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
@@ -130,7 +123,6 @@ venvPath = "."
 venv = ".venv"
 
 include = ["src"]
-
 exclude = [
   "node_modules",
   "**/__pycache__",
