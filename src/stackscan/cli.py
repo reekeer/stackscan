@@ -8,16 +8,18 @@ import json
 import sys
 from collections.abc import Iterable
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from rich.console import Console
 from rich.table import Table
 
 from stackscan import __version__
-from stackscan.config import load_framework_rules
-from stackscan.core import StackscanSession, detect_tech
-from stackscan.types import DetectedTech, RulesByCategory, ScanTargetResult
+from stackscan.config import SigDBDetector, load_sigdb_rules
+from stackscan.types import DetectedTech, ScanTargetResult
 from stackscan.utils import normalize_url
+
+if TYPE_CHECKING:
+    from stackscan.config.sigdb_loader import SigDBDetector
 
 DEFAULT_TIMEOUT = 12.0
 DEFAULT_MAX_BYTES = 1_000_000
@@ -39,9 +41,9 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
         help="Path to a file with targets (one per line).",
     )
     parser.add_argument(
-        "--frameworks",
-        dest="frameworks",
-        help="Frameworks JSON source (file path or URL). Default: bundled frameworks.json",
+        "--sigdb",
+        dest="sigdb",
+        help="SigDB binary file path. Default: ~/reekeer/sigdb/sigdb.sigdb",
     )
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="Request timeout.")
     parser.add_argument(
@@ -111,14 +113,16 @@ def _dedupe(items: Iterable[str]) -> list[str]:
 async def _scan_target(
     url: str,
     *,
-    rules: RulesByCategory,
-    session: StackscanSession,
+    sigdb_detector: SigDBDetector,
+    session: "StackscanSession",
     timeout: float,
     user_agent: str,
     insecure: bool,
     max_bytes: int,
     semaphore: asyncio.Semaphore,
 ) -> ScanTargetResult:
+    from stackscan.core import StackscanSession
+
     async with semaphore:
         try:
             result = await session.fetch(
@@ -131,17 +135,20 @@ async def _scan_target(
         except Exception as exc:  # noqa: BLE001 - CLI should be resilient
             return ScanTargetResult(url=url, status=None, detected={}, error=str(exc))
 
-    detected = detect_tech(result, rules)
+    detected = sigdb_detector.detect(result)
     return ScanTargetResult(url=result.url, status=result.status, detected=detected, error=None)
 
 
 async def _run_scans(args: argparse.Namespace) -> list[ScanTargetResult]:
+    from stackscan.core import StackscanSession
+
     raw_targets = _read_targets(args.file, args.targets)
     if not raw_targets:
         return []
 
     targets = _dedupe([normalize_url(target) for target in raw_targets])
-    rules = await load_framework_rules(args.frameworks)
+
+    sigdb_detector = await load_sigdb_rules(args.sigdb)
 
     connector_limit = max(args.concurrency, 1)
     semaphore = asyncio.Semaphore(connector_limit)
@@ -151,7 +158,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanTargetResult]:
         tasks = [
             _scan_target(
                 target,
-                rules=rules,
+                sigdb_detector=sigdb_detector,
                 session=session,
                 timeout=args.timeout,
                 user_agent=args.user_agent,

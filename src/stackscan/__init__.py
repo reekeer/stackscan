@@ -1,15 +1,14 @@
 """Stackscan package."""
 
-from .config import DEFAULT_FRAMEWORKS_URL, load_framework_rules
-from .core import StackscanSession, detect_tech
+from .config import SigDBDetector, load_sigdb_rules
+from .core import StackscanSession
 from .utils import normalize_url
 
 __all__ = [
     "__version__",
-    "DEFAULT_FRAMEWORKS_URL",
+    "SigDBDetector",
     "StackscanSession",
-    "detect_tech",
-    "load_framework_rules",
+    "load_sigdb_rules",
     "normalize_url",
 ]
 
