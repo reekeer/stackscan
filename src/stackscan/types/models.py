@@ -17,10 +17,3 @@ class FetchResult:
     headers: Headers
     body: str
     cookies: Cookies
-
-
-@dataclass(frozen=True)
-class Rule:
-    html: Sequence[str] = ()
-    headers: Sequence[str] = ()
-    cookies: Sequence[str] = ()

@@ -14,9 +14,8 @@ from rich.console import Console
 from rich.table import Table
 
 from stackscan import __version__
-from stackscan.config import SigDBDetector, load_framework_rules, load_sigdb_rules
-from stackscan.core import StackscanSession, detect_tech
-from stackscan.types import DetectedTech, RulesByCategory, ScanTargetResult
+from stackscan.config import SigDBDetector, load_sigdb_rules
+from stackscan.types import DetectedTech, ScanTargetResult
 from stackscan.utils import normalize_url
 
 if TYPE_CHECKING:
@@ -40,11 +39,6 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
         dest="file",
         type=Path,
         help="Path to a file with targets (one per line).",
-    )
-    parser.add_argument(
-        "--frameworks",
-        dest="frameworks",
-        help="Frameworks JSON source (file path or URL). Default: bundled frameworks.json",
     )
     parser.add_argument(
         "--sigdb",
@@ -119,15 +113,16 @@ def _dedupe(items: Iterable[str]) -> list[str]:
 async def _scan_target(
     url: str,
     *,
-    rules: RulesByCategory | None,
-    sigdb_detector: SigDBDetector | None,
-    session: StackscanSession,
+    sigdb_detector: SigDBDetector,
+    session: "StackscanSession",
     timeout: float,
     user_agent: str,
     insecure: bool,
     max_bytes: int,
     semaphore: asyncio.Semaphore,
 ) -> ScanTargetResult:
+    from stackscan.core import StackscanSession
+
     async with semaphore:
         try:
             result = await session.fetch(
@@ -140,31 +135,20 @@ async def _scan_target(
         except Exception as exc:  # noqa: BLE001 - CLI should be resilient
             return ScanTargetResult(url=url, status=None, detected={}, error=str(exc))
 
-    if sigdb_detector is not None:
-        detected = sigdb_detector.detect(result)
-    else:
-        assert rules is not None
-        detected = detect_tech(result, rules)
+    detected = sigdb_detector.detect(result)
     return ScanTargetResult(url=result.url, status=result.status, detected=detected, error=None)
 
 
 async def _run_scans(args: argparse.Namespace) -> list[ScanTargetResult]:
+    from stackscan.core import StackscanSession
+
     raw_targets = _read_targets(args.file, args.targets)
     if not raw_targets:
         return []
 
     targets = _dedupe([normalize_url(target) for target in raw_targets])
 
-    rules: RulesByCategory | None = None
-    sigdb_detector: SigDBDetector | None = None
-
-    default_sigdb_path = Path.home() / "reekeer" / "sigdb" / "sigdb.sigdb"
-    if args.sigdb is not None:
-        sigdb_detector = await load_sigdb_rules(args.sigdb)
-    elif args.frameworks is None and default_sigdb_path.is_file():
-        sigdb_detector = await load_sigdb_rules()
-    else:
-        rules = await load_framework_rules(args.frameworks)
+    sigdb_detector = await load_sigdb_rules(args.sigdb)
 
     connector_limit = max(args.concurrency, 1)
     semaphore = asyncio.Semaphore(connector_limit)
@@ -174,7 +158,6 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanTargetResult]:
         tasks = [
             _scan_target(
                 target,
-                rules=rules,
                 sigdb_detector=sigdb_detector,
                 session=session,
                 timeout=args.timeout,

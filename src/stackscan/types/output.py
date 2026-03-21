@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import cast
+from typing import TypeAlias, cast
 
-from .aliases import DetectedTech
+DetectedTech: TypeAlias = dict[str, list[str]]
 
 
 @dataclass(frozen=True)
@@ -14,10 +14,3 @@ class ScanTargetResult:
     status: int | None
     detected: DetectedTech = field(default_factory=lambda: cast(DetectedTech, {}))
     error: str | None = None
-
-
-@dataclass(frozen=True)
-class ScanSummary:
-    results: list[ScanTargetResult] = field(
-        default_factory=lambda: cast(list[ScanTargetResult], [])
-    )
