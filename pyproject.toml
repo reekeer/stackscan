@@ -47,7 +47,8 @@ keywords = [
 dev = [
   "ruff>=0.5",
   "black>=24.0",
-  "pyright>=1.1"
+  "pyright>=1.1",
+  "pytest>=8.0"
 ]
 
 [project.urls]
@@ -137,3 +138,8 @@ reportMissingTypeStubs = false
 reportOptionalMemberAccess = true
 reportOptionalSubscript = true
 reportGeneralTypeIssues = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
