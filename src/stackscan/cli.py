@@ -1,4 +1,4 @@
-"""Stackscan CLI - lightweight Wappalyzer-like tech detection."""
+"""Stackscan CLI - lightweight Wappalyzer-like tech detection with anti-bot evasion."""
 
 from __future__ import annotations
 
@@ -24,13 +24,13 @@ if TYPE_CHECKING:
 DEFAULT_TIMEOUT = 12.0
 DEFAULT_MAX_BYTES = 1_000_000
 DEFAULT_CONCURRENCY = 10
-DEFAULT_USER_AGENT = "stackscan/1.0 (+https://example.invalid)"
+DEFAULT_DELAY_MS = 0
 
 
 def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="stackscan",
-        description="Lightweight Wappalyzer-like stack detector.",
+        description="Lightweight Wappalyzer-like stack detector with anti-bot evasion.",
     )
     parser.add_argument("targets", nargs="*", help="Target URLs or hostnames.")
     parser.add_argument(
@@ -49,8 +49,21 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--user-agent",
         dest="user_agent",
-        default=DEFAULT_USER_AGENT,
-        help="Custom User-Agent header.",
+        default=None,
+        help="Custom User-Agent. Default: random realistic browser UA.",
+    )
+    parser.add_argument(
+        "--realistic-ua",
+        dest="realistic_ua",
+        action="store_true",
+        default=True,
+        help="Use realistic browser User-Agent (default).",
+    )
+    parser.add_argument(
+        "--no-realistic-ua",
+        dest="no_realistic_ua",
+        action="store_true",
+        help="Disable realistic User-Agent (use default stackscan UA).",
     )
     parser.add_argument(
         "--insecure",
@@ -70,6 +83,12 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
         default=DEFAULT_CONCURRENCY,
         help="Number of concurrent requests.",
     )
+    parser.add_argument(
+        "--delay",
+        type=int,
+        default=DEFAULT_DELAY_MS,
+        help="Delay between requests in milliseconds (anti-bot).",
+    )
     parser.add_argument("--json", dest="json_output", action="store_true", help="JSON output.")
     parser.add_argument(
         "--show-empty",
@@ -81,7 +100,12 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
         action="version",
         version=f"%(prog)s {__version__}",
     )
-    return parser.parse_args(list(argv) if argv is not None else None)
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    if args.no_realistic_ua:
+        args.realistic_ua = False
+
+    return args
 
 
 def _read_targets(path: Path | None, positional: Iterable[str]) -> list[str]:
@@ -116,19 +140,17 @@ async def _scan_target(
     sigdb_detector: SigDBDetector,
     session: "StackscanSession",
     timeout: float,
-    user_agent: str,
+    user_agent: str | None,
     insecure: bool,
     max_bytes: int,
     semaphore: asyncio.Semaphore,
 ) -> ScanTargetResult:
-    from stackscan.core import StackscanSession
-
     async with semaphore:
         try:
             result = await session.fetch(
                 url,
                 timeout=timeout,
-                user_agent=user_agent,
+                user_agent=user_agent or "",
                 insecure=insecure,
                 max_bytes=max_bytes,
             )
@@ -153,7 +175,9 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanTargetResult]:
     connector_limit = max(args.concurrency, 1)
     semaphore = asyncio.Semaphore(connector_limit)
 
-    async with StackscanSession() as session:
+    user_agent = None if args.realistic_ua else args.user_agent
+
+    async with StackscanSession(delay_ms=args.delay) as session:
         session = cast(StackscanSession, session)
         tasks = [
             _scan_target(
@@ -161,7 +185,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanTargetResult]:
                 sigdb_detector=sigdb_detector,
                 session=session,
                 timeout=args.timeout,
-                user_agent=args.user_agent,
+                user_agent=user_agent,
                 insecure=args.insecure,
                 max_bytes=args.max_bytes,
                 semaphore=semaphore,

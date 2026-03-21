@@ -1,16 +1,19 @@
-"""SigDB loader and matcher adapter for stackscan."""
+"""Optimized SigDB loader and matcher adapter for stackscan."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from stackscan.types import DetectedTech, FetchResult
 
 if TYPE_CHECKING:
-    from sigdb.core.reader import SigDBMatcher, SigDBReader
+    from sigdb.core.reader import SigDBMatcher
 
 DEFAULT_SIGDB_PATH = Path.home() / "reekeer" / "sigdb" / "sigdb.sigdb"
+
+_COOKIE_RE = re.compile(r"^([^=]+)=(.+)$")
 
 
 def _default_sigdb_path() -> Path | None:
@@ -21,36 +24,82 @@ def _default_sigdb_path() -> Path | None:
 
 
 class SigDBDetector:
+    __slots__ = ("_matcher", "_headers_cache", "_html_cache")
+
     def __init__(self, matcher: SigDBMatcher) -> None:
         self._matcher = matcher
+        self._headers_cache: dict[str, str | None] = {}
+        self._html_cache: dict[str, str | None] = {}
 
     def detect(self, result: FetchResult) -> DetectedTech:
         from sigdb.core.reader import match_group, match_html
 
-        detected: dict[str, set[str]] = {}
+        detected_headers: set[str] = set()
+        detected_cookies: set[str] = set()
+        detected_html: set[str] | None = None
 
-        for name, value in result.headers.items():
-            if name.lower() == "_raw":
+        headers = result.headers
+        for name, value in headers.items():
+            if name == "_raw":
                 continue
-            m = match_group("headers", value.lower(), self._matcher, name=name.lower())
+            name_lower = name.lower()
+            cache_key = f"{name_lower}:{value[:64]}"
+            cached = self._headers_cache.get(cache_key)
+            if cached is not None:
+                if cached:
+                    detected_headers.add(cached)
+                continue
+            m = match_group("headers", value.lower(), self._matcher, name=name_lower)
             if m.result and m.item:
-                detected.setdefault("headers", set()).add(m.item.key)
+                key = m.item.key
+                detected_headers.add(key)
+                self._headers_cache[cache_key] = key
+            else:
+                self._headers_cache[cache_key] = ""
 
-        if result.cookies:
-            cookies_text = "\n".join(result.cookies)
-            for cookie in cookies_text.split(";"):
+        cookies = result.cookies
+        if cookies:
+            for cookie in cookies:
                 cookie = cookie.strip()
-                if "=" in cookie:
-                    name, _, value = cookie.partition("=")
-                    m = match_group("headers", value.lower(), self._matcher, name=name.strip().lower())
+                match = _COOKIE_RE.match(cookie)
+                if match:
+                    cookie_name, cookie_value = match.groups()
+                    m = match_group(
+                        "headers",
+                        cookie_value.lower(),
+                        self._matcher,
+                        name=cookie_name.strip().lower(),
+                    )
                     if m.result and m.item:
-                        detected.setdefault("cookies", set()).add(m.item.key)
+                        detected_cookies.add(m.item.key)
 
-        m = match_html(result.body, self._matcher)
-        if m.result and m.item:
-            detected.setdefault("html", set()).add(m.item.key)
+        body = result.body
+        if body:
+            body_hash = hash(body[:4096])
+            cached = self._html_cache.get(body_hash)
+            if cached is not None:
+                if cached:
+                    detected_html = {cached}
+            else:
+                m = match_html(body, self._matcher)
+                if m.result and m.item:
+                    key = m.item.key
+                    detected_html = {key}
+                    self._html_cache[body_hash] = key
+                else:
+                    self._html_cache[body_hash] = ""
 
-        return {category: sorted(names) for category, names in detected.items()}
+        if not detected_headers and not detected_cookies and not detected_html:
+            return {}
+
+        result_detected: DetectedTech = {}
+        if detected_headers:
+            result_detected["headers"] = sorted(detected_headers)
+        if detected_cookies:
+            result_detected["cookies"] = sorted(detected_cookies)
+        if detected_html:
+            result_detected["html"] = sorted(detected_html)
+        return result_detected
 
 
 def load_sigdb_detector(source: str | Path | None = None) -> SigDBDetector:
