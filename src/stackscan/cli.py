@@ -158,8 +158,11 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanTargetResult]:
     rules: RulesByCategory | None = None
     sigdb_detector: SigDBDetector | None = None
 
+    default_sigdb_path = Path.home() / "reekeer" / "sigdb" / "sigdb.sigdb"
     if args.sigdb is not None:
         sigdb_detector = await load_sigdb_rules(args.sigdb)
+    elif args.frameworks is None and default_sigdb_path.is_file():
+        sigdb_detector = await load_sigdb_rules()
     else:
         rules = await load_framework_rules(args.frameworks)
 
