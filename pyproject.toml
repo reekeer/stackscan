@@ -44,6 +44,12 @@ keywords = [
 ]
 
 [project.optional-dependencies]
+dns = [
+  "dnspython>=2.6"
+]
+geo = [
+  "geoip2>=4.8"
+]
 dev = [
   "ruff>=0.5",
   "black>=24.0",
