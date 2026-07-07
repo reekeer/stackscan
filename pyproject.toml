@@ -47,7 +47,8 @@ keywords = [
 dev = [
   "ruff>=0.5",
   "black>=24.0",
-  "pyright>=1.1"
+  "pyright>=1.1",
+  "pytest>=8.0"
 ]
 
 [project.urls]
@@ -71,13 +72,15 @@ packages = ["src/stackscan"]
 dependencies = [
   "ruff",
   "black",
-  "pyright"
+  "pyright",
+  "pytest"
 ]
 
 [tool.hatch.envs.default.scripts]
 lint = "ruff check ."
 format = "black ."
 types = "pyright"
+test = "pytest"
 
 
 [tool.black]
