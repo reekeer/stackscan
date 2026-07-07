@@ -19,7 +19,7 @@ from stackscan.types import DetectedTech, ScanTargetResult
 from stackscan.utils import normalize_url
 
 if TYPE_CHECKING:
-    from stackscan.config.sigdb_loader import SigDBDetector
+    from stackscan.core import StackscanSession
 
 DEFAULT_TIMEOUT = 12.0
 DEFAULT_MAX_BYTES = 1_000_000
@@ -114,15 +114,13 @@ async def _scan_target(
     url: str,
     *,
     sigdb_detector: SigDBDetector,
-    session: "StackscanSession",
+    session: StackscanSession,
     timeout: float,
     user_agent: str,
     insecure: bool,
     max_bytes: int,
     semaphore: asyncio.Semaphore,
 ) -> ScanTargetResult:
-    from stackscan.core import StackscanSession
-
     async with semaphore:
         try:
             result = await session.fetch(
