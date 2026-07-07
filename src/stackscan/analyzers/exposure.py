@@ -63,7 +63,7 @@ async def analyze_exposure(
     security_txt = sec_status == 200
 
     git_status, git_body = await _get(session, urljoin(base_url, "/.git/HEAD"), probe)
-    git_exposed = git_status == 200 and "ref:" in git_body
+    git_exposed = git_status == 200 and git_body.strip().startswith("ref:")
     if git_exposed:
         findings.append("Exposed .git/HEAD (source repository may be publicly readable)")
 
