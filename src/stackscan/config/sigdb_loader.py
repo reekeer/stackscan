@@ -36,15 +36,13 @@ class SigDBDetector:
             if m.result and m.item:
                 detected.setdefault("headers", set()).add(m.item.key)
 
-        if result.cookies:
-            cookies_text = "\n".join(result.cookies)
-            for cookie in cookies_text.split(";"):
-                cookie = cookie.strip()
-                if "=" in cookie:
-                    name, _, value = cookie.partition("=")
-                    m = match_group("headers", value.lower(), self._matcher, name=name.strip().lower())
-                    if m.result and m.item:
-                        detected.setdefault("cookies", set()).add(m.item.key)
+        for raw_cookie in result.cookies:
+            first_segment = raw_cookie.split(";", 1)[0].strip()
+            if "=" in first_segment:
+                name, _, value = first_segment.partition("=")
+                m = match_group("headers", value.lower(), self._matcher, name=name.strip().lower())
+                if m.result and m.item:
+                    detected.setdefault("cookies", set()).add(m.item.key)
 
         m = match_html(result.body, self._matcher)
         if m.result and m.item:
