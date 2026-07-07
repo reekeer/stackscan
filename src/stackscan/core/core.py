@@ -54,6 +54,9 @@ class StackscanSession:
             cookies = resp.headers.getall("Set-Cookie", [])
             charset = resp.charset or "utf-8"
             body_bytes = await resp.content.read(max_bytes)
+            # Drain the rest of the body so the connection can be reused.
+            while await resp.content.read(8192):
+                pass
             body = body_bytes.decode(charset, errors="replace")
             url_final = str(resp.url)
 
