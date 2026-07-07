@@ -1,5 +1,19 @@
 """Configuration helpers."""
 
-from .sigdb_loader import SigDBDetector, load_sigdb_rules
+from stackscan.config.sigdb_loader import (
+    DEFAULT_SIGDB_PATH,
+    NoSignaturesError,
+    build_matchers,
+    resolve_sigdb_paths,
+)
+from stackscan.config.sources import Source, SourceError, SourceStore
 
-__all__ = ["SigDBDetector", "load_sigdb_rules"]
+__all__ = [
+    "DEFAULT_SIGDB_PATH",
+    "NoSignaturesError",
+    "Source",
+    "SourceError",
+    "SourceStore",
+    "build_matchers",
+    "resolve_sigdb_paths",
+]
