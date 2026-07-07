@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from stackscan.types import DetectedTech, FetchResult
 
 if TYPE_CHECKING:
-    from sigdb.core.reader import SigDBMatcher, SigDBReader
+    from sigdb.core.reader import SigDBMatcher
 
 DEFAULT_SIGDB_PATH = Path.home() / "reekeer" / "sigdb" / "sigdb.sigdb"
 
