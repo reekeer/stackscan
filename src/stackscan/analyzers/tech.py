@@ -83,8 +83,15 @@ class TechAnalyzer:
 
             for src in _script_srcs(result.body):
                 self._add(acc, matcher.match_group_all("script_src", src), "script_src")
+                self._add(acc, matcher.match_text(src), "script_src")
 
             self._add(acc, matcher.match_html_all(result.body), "html")
+
+            # Raw substring scan of the response body catches content-style
+            # signatures (inline scripts, script URLs, HTML markers) imported
+            # from webappanalyzer-style datasets.
+            self._add(acc, matcher.match_text(result.body), "body")
+            self._add(acc, matcher.match_text(result.url), "url")
 
         technologies = [
             Technology(
