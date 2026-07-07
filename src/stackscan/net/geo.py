@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any, cast
 
 
 class GeoProvider:
@@ -18,37 +19,37 @@ class GeoProvider:
         env_path = os.environ.get("STACKSCAN_GEOIP_DB")
         resolved = db_path or env_path
         self._db_path = Path(resolved) if resolved else None
-        self._reader: object | None = None
+        self._reader: Any = None
         self._unavailable = False
 
     @property
     def enabled(self) -> bool:
         return self._db_path is not None and self._db_path.is_file()
 
-    def _ensure_reader(self) -> object | None:
+    def _ensure_reader(self) -> Any:
         if self._reader is not None or self._unavailable:
             return self._reader
         if not self.enabled:
             self._unavailable = True
             return None
         try:
-            import geoip2.database  # type: ignore[import-untyped]
+            from geoip2 import database as _geoip_db  # type: ignore[import-untyped]
         except ImportError:
             self._unavailable = True
             return None
         try:
-            self._reader = geoip2.database.Reader(str(self._db_path))
+            self._reader = cast("Any", _geoip_db).Reader(str(self._db_path))
         except Exception:
             self._unavailable = True
             return None
         return self._reader
 
     def lookup(self, ip: str) -> dict[str, str]:
-        reader = self._ensure_reader()
+        reader: Any = self._ensure_reader()
         if reader is None:
             return {}
         try:
-            response = reader.city(ip)  # type: ignore[attr-defined]
+            response: Any = reader.city(ip)
         except Exception:
             return {}
         out: dict[str, str] = {}
@@ -64,7 +65,9 @@ class GeoProvider:
         return out
 
 
-def lookup_geo(ips: tuple[str, ...], provider: GeoProvider | None = None) -> dict[str, dict[str, str]]:
+def lookup_geo(
+    ips: tuple[str, ...], provider: GeoProvider | None = None
+) -> dict[str, dict[str, str]]:
     provider = provider or GeoProvider()
     if not provider.enabled:
         return {}

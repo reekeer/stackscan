@@ -4,21 +4,42 @@ from __future__ import annotations
 
 import socket
 import ssl
-from typing import Any
+from typing import Any, cast
 
 from stackscan.types import TlsInfo
 
 
-def _join_rdn(rdn: Any) -> str:
-    parts: list[str] = []
+def _as_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _join_rdn(rdn: object) -> str:
+    """Flatten ssl's nested RDN structure (tuple of tuples of (key, value))."""
+
     if not isinstance(rdn, (tuple, list)):
         return ""
-    for entry in rdn:  # type: ignore[assignment]
-        if isinstance(entry, (tuple, list)):
-            for pair in entry:  # type: ignore[assignment]
-                if isinstance(pair, (tuple, list)) and len(pair) == 2:
-                    parts.append(f"{pair[0]}={pair[1]}")
+    parts: list[str] = []
+    for entry in cast("tuple[object, ...]", rdn):
+        if not isinstance(entry, (tuple, list)):
+            continue
+        pair = cast("tuple[object, ...]", entry)
+        if len(pair) == 2:
+            parts.append(f"{pair[0]}={pair[1]}")
     return ", ".join(parts)
+
+
+def _subject_alt_names(cert: dict[str, Any]) -> tuple[str, ...]:
+    san_raw = cert.get("subjectAltName")
+    if not isinstance(san_raw, (tuple, list)):
+        return ()
+    names: list[str] = []
+    for entry in cast("tuple[object, ...]", san_raw):
+        if not isinstance(entry, (tuple, list)):
+            continue
+        pair = cast("tuple[object, ...]", entry)
+        if len(pair) == 2 and pair[0] == "DNS" and isinstance(pair[1], str):
+            names.append(pair[1])
+    return tuple(names)
 
 
 def fetch_tls_info(host: str, port: int = 443, *, timeout: float = 8.0) -> TlsInfo | None:
@@ -26,26 +47,23 @@ def fetch_tls_info(host: str, port: int = 443, *, timeout: float = 8.0) -> TlsIn
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:
             with context.wrap_socket(sock, server_hostname=host) as tls:
-                cert = tls.getpeercert()
+                raw_cert = tls.getpeercert()
                 protocol = tls.version()
                 cipher_tuple = tls.cipher()
     except (OSError, ssl.SSLError, ValueError):
         return None
 
-    if not cert:
-        return TlsInfo(protocol=protocol, cipher=cipher_tuple[0] if cipher_tuple else None)
+    cipher = cipher_tuple[0] if cipher_tuple else None
+    if not raw_cert:
+        return TlsInfo(protocol=protocol, cipher=cipher)
 
-    san: list[str] = []
-    for kind, value in cert.get("subjectAltName", ()):  # type: ignore[union-attr]
-        if kind == "DNS":
-            san.append(str(value))
-
+    cert = cast("dict[str, Any]", raw_cert)
     return TlsInfo(
         subject=_join_rdn(cert.get("subject")) or None,
         issuer=_join_rdn(cert.get("issuer")) or None,
-        subject_alt_names=tuple(san),
-        not_before=cert.get("notBefore"),
-        not_after=cert.get("notAfter"),
+        subject_alt_names=_subject_alt_names(cert),
+        not_before=_as_str(cert.get("notBefore")),
+        not_after=_as_str(cert.get("notAfter")),
         protocol=protocol,
-        cipher=cipher_tuple[0] if cipher_tuple else None,
+        cipher=cipher,
     )

@@ -96,7 +96,8 @@ class SourceStore:
             return []
         if not isinstance(data, list):
             return []
-        return [cast(dict[str, Any], row) for row in data if isinstance(row, dict)]
+        rows = cast("list[object]", data)
+        return [cast("dict[str, Any]", row) for row in rows if isinstance(row, dict)]
 
     def list(self) -> list[Source]:
         sources: list[Source] = []

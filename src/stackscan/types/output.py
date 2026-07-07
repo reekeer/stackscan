@@ -31,8 +31,8 @@ class NetworkInfo:
     ipv4: tuple[str, ...] = ()
     ipv6: tuple[str, ...] = ()
     cname: tuple[str, ...] = ()
-    reverse_dns: dict[str, str] = field(default_factory=dict)
-    geo: dict[str, dict[str, str]] = field(default_factory=dict)
+    reverse_dns: dict[str, str] = field(default_factory=dict[str, str])
+    geo: dict[str, dict[str, str]] = field(default_factory=dict[str, dict[str, str]])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -89,7 +89,7 @@ class InfraInfo:
 
 @dataclass(frozen=True)
 class SecurityHeaders:
-    present: dict[str, str] = field(default_factory=dict)
+    present: dict[str, str] = field(default_factory=dict[str, str])
     missing: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -124,7 +124,7 @@ class ScanReport:
     final_url: str | None = None
     status: int | None = None
     error: str | None = None
-    technologies: list[Technology] = field(default_factory=list)
+    technologies: list[Technology] = field(default_factory=list[Technology])
     infra: InfraInfo = field(default_factory=InfraInfo)
     security: SecurityHeaders = field(default_factory=SecurityHeaders)
     network: NetworkInfo | None = None

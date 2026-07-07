@@ -38,8 +38,8 @@ def _script_srcs(html: str) -> list[str]:
 
 @dataclass
 class _Acc:
-    categories: set[str] = field(default_factory=set)
-    evidence: list[str] = field(default_factory=list)
+    categories: set[str] = field(default_factory=set[str])
+    evidence: list[str] = field(default_factory=list[str])
 
 
 class TechAnalyzer:
@@ -62,7 +62,9 @@ class TechAnalyzer:
             for name, value in result.headers.items():
                 if name == "_raw":
                     continue
-                self._add(acc, matcher.match_group_all("headers", value, name=name), f"header:{name}")
+                self._add(
+                    acc, matcher.match_group_all("headers", value, name=name), f"header:{name}"
+                )
 
             for raw_cookie in result.cookies:
                 segment = raw_cookie.split(";", 1)[0].strip()

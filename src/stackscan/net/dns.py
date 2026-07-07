@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import socket
 from dataclasses import dataclass
+from typing import Any, cast
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,7 @@ def _addrinfo(host: str, family: int) -> list[str]:
         return []
     seen: list[str] = []
     for info in infos:
-        addr = info[4][0]
+        addr = str(info[4][0])
         if addr not in seen:
             seen.append(addr)
     return seen
@@ -42,15 +43,16 @@ def _reverse(ip: str) -> str | None:
 
 def _cname_chain(host: str) -> tuple[str, ...]:
     try:
-        import dns.resolver  # type: ignore[import-untyped]
+        from dns import resolver as _dns_resolver  # type: ignore[import-untyped]
     except ImportError:
         return ()
-    chain: list[str] = []
+    resolver = cast("Any", _dns_resolver)
     try:
-        answers = dns.resolver.resolve(host, "CNAME", raise_on_no_answer=False)
+        answers: Any = resolver.resolve(host, "CNAME", raise_on_no_answer=False)
     except Exception:
         return ()
-    for rdata in answers:
+    chain: list[str] = []
+    for rdata in cast("list[Any]", answers):
         target = str(getattr(rdata, "target", "")).rstrip(".")
         if target and target not in chain:
             chain.append(target)
