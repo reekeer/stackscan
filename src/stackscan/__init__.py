@@ -1,15 +1,12 @@
 """Stackscan package."""
 
-from .config import SigDBDetector, load_sigdb_rules
 from .core import StackscanSession
 from .utils import normalize_url
 
 __all__ = [
-    "__version__",
-    "SigDBDetector",
     "StackscanSession",
-    "load_sigdb_rules",
+    "__version__",
     "normalize_url",
 ]
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
