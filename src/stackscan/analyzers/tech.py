@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from stackscan.types import FetchResult, Technology
 
 if TYPE_CHECKING:
     from sigdb.core import SigDBMatcher
-    from sigdb.types import SigDBItem
+    from sigdb.types import SigDBMatchResult
 
 _META_RE = re.compile(r"<meta\b([^>]*)>", re.IGNORECASE)
 _SCRIPT_SRC_RE = re.compile(r"<script\b[^>]*\bsrc\s*=\s*[\"']?([^\"'\s>]+)", re.IGNORECASE)
@@ -36,35 +35,27 @@ def _script_srcs(html: str) -> list[str]:
     return [match.group(1) for match in _SCRIPT_SRC_RE.finditer(html)]
 
 
-@dataclass
-class _Acc:
-    categories: set[str] = field(default_factory=set[str])
-    evidence: list[str] = field(default_factory=list[str])
-
-
 class TechAnalyzer:
     """Detects technologies by querying every configured sigdb matcher."""
 
     def __init__(self, matchers: list[SigDBMatcher]) -> None:
         self._matchers = matchers
 
-    def _add(self, acc: dict[str, _Acc], items: list[SigDBItem], evidence: str) -> None:
-        for item in items:
-            entry = acc.setdefault(item.key, _Acc())
-            entry.categories.update(item.categories)
-            if evidence not in entry.evidence:
-                entry.evidence.append(evidence)
+    def _add(self, acc: dict[str, list[str]], match: SigDBMatchResult, evidence: str) -> None:
+        if not match.result or match.item is None:
+            return
+        evidence_list = acc.setdefault(match.item.key, [])
+        if evidence not in evidence_list:
+            evidence_list.append(evidence)
 
     def detect(self, result: FetchResult) -> list[Technology]:
-        acc: dict[str, _Acc] = {}
+        acc: dict[str, list[str]] = {}
 
         for matcher in self._matchers:
             for name, value in result.headers.items():
                 if name == "_raw":
                     continue
-                self._add(
-                    acc, matcher.match_group_all("headers", value, name=name), f"header:{name}"
-                )
+                self._add(acc, matcher.match_group("headers", value, name=name), f"header:{name}")
 
             for raw_cookie in result.cookies:
                 segment = raw_cookie.split(";", 1)[0].strip()
@@ -74,32 +65,32 @@ class TechAnalyzer:
                 cname = cname.strip().lower()
                 self._add(
                     acc,
-                    matcher.match_group_all("headers", cvalue, name=cname),
+                    matcher.match_group("headers", cvalue, name=cname),
                     f"cookie:{cname}",
                 )
 
             for key, content in _meta_pairs(result.body):
-                self._add(acc, matcher.match_group_all("meta", content, name=key), f"meta:{key}")
+                self._add(acc, matcher.match_group("meta", content, name=key), f"meta:{key}")
 
             for src in _script_srcs(result.body):
-                self._add(acc, matcher.match_group_all("script_src", src), "script_src")
-                self._add(acc, matcher.match_text(src), "script_src")
+                self._add(acc, matcher.match_group("script_src", src), "script_src")
+                self._add(acc, matcher.match(src), "script_src")
 
-            self._add(acc, matcher.match_html_all(result.body), "html")
+            self._add(acc, matcher.match_html(result.body), "html")
 
             # Raw substring scan of the response body catches content-style
             # signatures (inline scripts, script URLs, HTML markers) imported
             # from webappanalyzer-style datasets.
-            self._add(acc, matcher.match_text(result.body), "body")
-            self._add(acc, matcher.match_text(result.url), "url")
+            self._add(acc, matcher.match(result.body), "body")
+            self._add(acc, matcher.match(result.url), "url")
 
         technologies = [
             Technology(
                 name=name,
-                categories=tuple(sorted(entry.categories)),
-                evidence=tuple(entry.evidence),
+                categories=(),
+                evidence=tuple(evidence),
             )
-            for name, entry in acc.items()
+            for name, evidence in acc.items()
         ]
         technologies.sort(key=lambda tech: tech.name.lower())
         return technologies

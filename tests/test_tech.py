@@ -14,12 +14,11 @@ from stackscan.types import FetchResult
 
 def _matcher(tmp_path: Path) -> SigDBMatcher:
     rules: dict[str, Any] = {
-        "nginx": {"headers": {"Server": "nginx"}, "categories": ["web-server"]},
-        "PHP": {"headers": {"X-Powered-By": "PHP"}, "categories": ["language"]},
+        "nginx": {"headers": {"Server": "nginx"}},
+        "PHP": {"headers": {"X-Powered-By": "PHP"}},
         "WordPress": {
             "html": [{"tag": "meta", "attr": "name", "value": "generator"}],
             "meta": {"generator": "wordpress"},
-            "categories": ["cms"],
         },
     }
     out = tmp_path / "tech.sigdb"
@@ -40,7 +39,7 @@ def test_detects_multiple_technologies(tmp_path: Path) -> None:
     assert {"nginx", "PHP", "WordPress"} <= techs
 
 
-def test_evidence_and_categories_recorded(tmp_path: Path) -> None:
+def test_evidence_recorded(tmp_path: Path) -> None:
     analyzer = TechAnalyzer([_matcher(tmp_path)])
     result = FetchResult(
         url="https://example.com",
@@ -51,5 +50,4 @@ def test_evidence_and_categories_recorded(tmp_path: Path) -> None:
     )
     techs = analyzer.detect(result)
     nginx = next(tech for tech in techs if tech.name == "nginx")
-    assert nginx.categories == ("web-server",)
     assert "header:server" in nginx.evidence
