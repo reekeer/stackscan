@@ -18,5 +18,14 @@ def host_of(url: str) -> str:
     return (parsed.hostname or "").lower()
 
 
+def port_of(url: str) -> int:
+    """Return the explicit or default HTTPS port for a URL."""
+
+    parsed = urlparse(url)
+    if parsed.port is not None:
+        return parsed.port
+    return 443 if is_https(url) else 80
+
+
 def is_https(url: str) -> bool:
     return urlparse(url).scheme == "https"

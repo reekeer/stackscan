@@ -15,7 +15,7 @@ from stackscan.analyzers import (
 )
 from stackscan.net import GeoProvider, fetch_tls_info, lookup_geo, resolve_host
 from stackscan.types import FetchResult, NetworkInfo, ScanReport
-from stackscan.utils import host_of, is_https
+from stackscan.utils import host_of, is_https, port_of
 
 if TYPE_CHECKING:
     from stackscan.core import StackscanSession
@@ -78,7 +78,9 @@ async def scan_target(
         report.network = await _resolve_network(host, options, geo)
 
         if options.tls and host and is_https(url):
-            report.tls = await asyncio.to_thread(fetch_tls_info, host, insecure=options.insecure)
+            report.tls = await asyncio.to_thread(
+                fetch_tls_info, host, port_of(url), insecure=options.insecure
+            )
 
         if fetched is None:
             return report
