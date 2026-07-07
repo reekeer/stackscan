@@ -78,7 +78,7 @@ async def scan_target(
         report.network = await _resolve_network(host, options, geo)
 
         if options.tls and host and is_https(url):
-            report.tls = await asyncio.to_thread(fetch_tls_info, host)
+            report.tls = await asyncio.to_thread(fetch_tls_info, host, insecure=options.insecure)
 
         if fetched is None:
             return report

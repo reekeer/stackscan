@@ -42,8 +42,14 @@ def _subject_alt_names(cert: dict[str, Any]) -> tuple[str, ...]:
     return tuple(names)
 
 
-def fetch_tls_info(host: str, port: int = 443, *, timeout: float = 8.0) -> TlsInfo | None:
-    context = ssl.create_default_context()
+def fetch_tls_info(
+    host: str, port: int = 443, *, timeout: float = 8.0, insecure: bool = False
+) -> TlsInfo | None:
+    # ssl._create_unverified_context is the documented way to disable verification.
+    if insecure:
+        context = ssl._create_unverified_context()  # pyright: ignore[reportPrivateUsage]
+    else:
+        context = ssl.create_default_context()
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:
             with context.wrap_socket(sock, server_hostname=host) as tls:
