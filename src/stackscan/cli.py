@@ -9,7 +9,6 @@ import sys
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 
 from rich.console import Console
 from rich.table import Table
@@ -126,8 +125,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
     )
     semaphore = asyncio.Semaphore(max(args.concurrency, 1))
 
-    async with StackscanSession() as raw_session:
-        session = cast("StackscanSession", raw_session)
+    async with StackscanSession() as session:
         tasks = [
             scan_target(
                 target,

@@ -13,8 +13,20 @@ def _lower_headers(items: Iterable[tuple[str, str]]) -> dict[str, str]:
     return {key.lower(): value for key, value in items}
 
 
-class StackscanSession(ClientSession):
-    """ClientSession with stackscan defaults and helpers."""
+class StackscanSession:
+    """Holds an aiohttp ClientSession with stackscan defaults and helpers."""
+
+    def __init__(self) -> None:
+        self._session: ClientSession | None = None
+
+    async def __aenter__(self) -> StackscanSession:
+        self._session = ClientSession()
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        if self._session is not None:
+            await self._session.close()
+            self._session = None
 
     async def fetch(
         self,
@@ -25,7 +37,11 @@ class StackscanSession(ClientSession):
         insecure: bool,
         max_bytes: int,
     ) -> FetchResult:
-        async with self.get(
+        session = self._session
+        if session is None:
+            raise RuntimeError("StackscanSession is not entered")
+
+        async with session.get(
             url,
             headers={"User-Agent": user_agent},
             ssl=False if insecure else True,
