@@ -28,6 +28,8 @@ SIGDB_MAGIC = b"SIGT"
 _RULES_FILENAMES = ("sigdb.json", "rules.json", "signatures.json")
 _DOWNLOAD_UA = "stackscan-source-manager/1.0"
 _DOWNLOAD_TIMEOUT = 30
+_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+_DOWNLOAD_CHUNK_SIZE = 8192
 
 
 class SourceError(RuntimeError):
@@ -182,7 +184,19 @@ def _http_get(url: str) -> bytes:
     request = urllib.request.Request(url, headers={"User-Agent": _DOWNLOAD_UA})
     try:
         with urllib.request.urlopen(request, timeout=_DOWNLOAD_TIMEOUT) as response:
-            return cast(bytes, response.read())
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                chunk = response.read(_DOWNLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > _MAX_DOWNLOAD_BYTES:
+                    raise SourceError(
+                        f"downloaded source from {url} exceeds {_MAX_DOWNLOAD_BYTES} bytes"
+                    )
+                chunks.append(chunk)
+            return b"".join(chunks)
     except OSError as exc:
         raise SourceError(f"failed to fetch {url}: {exc}") from exc
 
