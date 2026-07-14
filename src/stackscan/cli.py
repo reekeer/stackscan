@@ -1,45 +1,56 @@
-"""Stackscan CLI - full web stack analysis backed by sigdb."""
-
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
 import sys
-from collections.abc import Iterable
+import time
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
 
-from stackscan import __version__
+from stackscan import __version__, theme
 from stackscan.analyzers import TechAnalyzer
-from stackscan.config import (
-    NoSignaturesError,
-    SourceError,
-    SourceStore,
-    build_matchers,
-)
-from stackscan.net import GeoProvider
+from stackscan.config import NoSignaturesError, SourceError, SourceStore, build_matchers
+from stackscan.net import GeoProvider, nmap_available
+from stackscan.render import render_banner, render_reports
 from stackscan.scan import ScanOptions, scan_target
 from stackscan.types import DetectedTech, ScanReport
-from stackscan.utils import normalize_url
+from stackscan.utils import expand_cidr, is_cidr, normalize_url
 
 DEFAULT_TIMEOUT = 12.0
-DEFAULT_MAX_BYTES = 1_000_000
+DEFAULT_MAX_BYTES = 1000000
 DEFAULT_CONCURRENCY = 10
+DEFAULT_WORKERS = 350
 DEFAULT_USER_AGENT = "stackscan/2.0 (+https://github.com/reekeer/stackscan)"
 
 
-# --------------------------------------------------------------------------- #
-# Argument parsing
-# --------------------------------------------------------------------------- #
+class _HelpAction(argparse.Action):
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: str | None = None,
+    ) -> None:
+        render_banner(Console())
+        parser.print_help()
+        parser.exit()
+
+
 def _build_scan_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stackscan",
         description="Full web stack analyzer (technologies, edge infra, network, exposure).",
+        add_help=False,
     )
+    parser.add_argument(
+        "-h", "--help", action=_HelpAction, nargs=0, help="Show this help message and exit."
+    )
+
     parser.add_argument("targets", nargs="*", help="Target URLs or hostnames.")
     parser.add_argument("-f", "--file", dest="file", type=Path, help="File with targets, one/line.")
     parser.add_argument("--sigdb", dest="sigdb", help="Explicit .sigdb path (overrides default).")
@@ -48,21 +59,181 @@ def _build_scan_parser() -> argparse.ArgumentParser:
     parser.add_argument("--user-agent", dest="user_agent", default=DEFAULT_USER_AGENT)
     parser.add_argument("--insecure", action="store_true", help="Disable TLS verification.")
     parser.add_argument("--max-bytes", dest="max_bytes", type=int, default=DEFAULT_MAX_BYTES)
-    parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
+    parser.add_argument(
+        "--concurrency", type=int, default=DEFAULT_CONCURRENCY, help="Concurrent targets."
+    )
     parser.add_argument("--geoip-db", dest="geoip_db", help="MaxMind .mmdb for IP geolocation.")
     parser.add_argument("--no-dns", action="store_true", help="Skip DNS/IP resolution.")
     parser.add_argument("--no-tls", action="store_true", help="Skip TLS certificate inspection.")
     parser.add_argument("--no-geo", action="store_true", help="Skip IP geolocation.")
     parser.add_argument("--no-probe", action="store_true", help="Skip passive exposure probes.")
+    parser.add_argument("--no-cve", action="store_true", help="Skip CVE correlation.")
+    parser.add_argument(
+        "--cve-online",
+        action="store_true",
+        help="Also query NVD live for detected products (default is offline).",
+    )
+    parser.add_argument("--no-builtin", action="store_true", help="Ignore the bundled sigdb.")
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Deep scan: enable ports, subdomains, offline CVEs, IP info, and default-cred checks.",
+    )
+    parser.add_argument(
+        "--ports",
+        action="store_true",
+        help="Active port/service scan (nmap if installed, else a Python connect scan).",
+    )
+    parser.add_argument(
+        "--no-nmap",
+        action="store_true",
+        help="Force the built-in Python port scan even when nmap is available.",
+    )
+    parser.add_argument(
+        "--port-timeout", dest="port_timeout", type=float, default=1.5, help="Per-port timeout."
+    )
+    parser.add_argument(
+        "--subdomains",
+        action="store_true",
+        help="Enumerate subdomains via AXFR + DNS wordlist + TLS SANs.",
+    )
+    parser.add_argument(
+        "--subdomain-limit",
+        dest="subdomain_limit",
+        type=int,
+        default=5000,
+        help="Max wordlist labels to resolve (0 = the full ~870k list, slow).",
+    )
+    parser.add_argument(
+        "--site-limit",
+        dest="site_limit",
+        type=int,
+        default=20,
+        help="Max derived sites to analyze from discovered open ports (0 = unlimited).",
+    )
+    parser.add_argument(
+        "--default-creds",
+        dest="default_creds",
+        action="store_true",
+        help="Bounded default-credential / open-device check (authorized targets only).",
+    )
+    parser.add_argument(
+        "--cred-limit",
+        dest="cred_limit",
+        type=int,
+        default=50,
+        help="Max default-credential pairs to try per device (0 = full SecLists list).",
+    )
+    parser.add_argument(
+        "--no-ip-info", dest="no_ip_info", action="store_true", help="Skip ipwho.is."
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=DEFAULT_WORKERS,
+        help="Parallel workers for ports/subdomains/creds.",
+    )
+    parser.add_argument(
+        "--no",
+        dest="no_passes",
+        default="",
+        metavar="LIST",
+        help='Skip passes by name, e.g. --no "dns,tls,geo,probe,cve,ip-info".',
+    )
+    parser.add_argument(
+        "--export",
+        dest="export",
+        default="",
+        metavar="FMTS",
+        help="Write report file(s): comma-separated json,xml,html.",
+    )
+    parser.add_argument(
+        "--output",
+        dest="output",
+        default="stackscan-report",
+        help="Base name/path for --export files (default: stackscan-report).",
+    )
     parser.add_argument("--json", dest="json_output", action="store_true", help="JSON output.")
+    parser.add_argument(
+        "--json-graph",
+        dest="json_graph",
+        action="store_true",
+        help="Include a nodes/edges graph in JSON output.",
+    )
     parser.add_argument("--show-empty", action="store_true", help="Show targets with no findings.")
+    parser.add_argument("--compact", action="store_true", help="Compact one-row-per-target table.")
+    parser.add_argument("--no-banner", action="store_true", help="Do not print the banner.")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        dest="verbose",
+        type=int,
+        default=0,
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
 
-# --------------------------------------------------------------------------- #
-# Target reading helpers (kept stable for reuse and tests)
-# --------------------------------------------------------------------------- #
+def _extract_verbose(argv: list[str]) -> tuple[int, list[str]]:
+
+    level = 0
+    rest: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("-v", "--verbose"):
+            level = max(level, 1)
+            if i + 1 < len(argv) and argv[i + 1].isdigit():
+                level = int(argv[i + 1])
+                i += 1
+        elif arg.startswith("--verbose="):
+            value = arg.split("=", 1)[1]
+            level = int(value) if value.isdigit() else 1
+        elif len(arg) >= 2 and arg[0] == "-" and set(arg[1:]) == {"v"}:
+            level = max(level, len(arg) - 1)
+        else:
+            rest.append(arg)
+        i += 1
+    return level, rest
+
+
+_NO_MAP: dict[str, str] = {
+    "dns": "no_dns",
+    "tls": "no_tls",
+    "geo": "no_geo",
+    "probe": "no_probe",
+    "cve": "no_cve",
+    "ip-info": "no_ip_info",
+    "ipinfo": "no_ip_info",
+    "ip": "no_ip_info",
+    "builtin": "no_builtin",
+    "sources": "no_sources",
+    "nmap": "no_nmap",
+    "banner": "no_banner",
+    "subdomains": "no_subdomains",
+    "ports": "no_ports",
+    "creds": "no_creds",
+    "default-creds": "no_creds",
+    "cve-online": "no_cve_online",
+    "ct": "no_ct",
+    "crt": "no_ct",
+    "passive": "no_ct",
+}
+
+
+def _apply_no(args: argparse.Namespace, console: Console) -> None:
+    for token in args.no_passes.replace(" ", ",").split(","):
+        token = token.strip().lower().lstrip("-")
+        if not token:
+            continue
+        attr = _NO_MAP.get(token)
+        if attr is None:
+            _warn(console, f"unknown --no pass: {token} (known: {', '.join(sorted(_NO_MAP))})")
+            continue
+        setattr(args, attr, True)
+
+
 def _read_targets(path: Path | None, positional: Iterable[str]) -> list[str]:
     targets = [item.strip() for item in positional if item.strip()]
     if path is None:
@@ -98,21 +269,49 @@ def _format_detected(detected: DetectedTech) -> str:
     return " | ".join(chunks)
 
 
-# --------------------------------------------------------------------------- #
-# Scan command
-# --------------------------------------------------------------------------- #
+async def _expand_wildcards(raw_targets: list[str], workers: int) -> list[str]:
+    from stackscan.net import expand_wildcard_target, has_wildcard, resolve_existing
+
+    console = Console(stderr=True)
+    out: list[str] = []
+    for target in raw_targets:
+        if not has_wildcard(target):
+            out.append(target)
+            continue
+        candidates = expand_wildcard_target(target)
+        console.print(
+            f"[{theme.MUTED}]expanding[/] {target} → {len(candidates)} candidates, resolving…",
+            highlight=False,
+        )
+        resolving = await resolve_existing(candidates, workers=max(workers * 10, 1000))
+        console.print(f"[{theme.SUCCESS}][+][/] {target}: {len(resolving)} live domain(s)")
+        out.extend(resolving)
+    return out
+
+
 async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
     from stackscan.core import StackscanSession
 
     raw_targets = _read_targets(args.file, args.targets)
     if not raw_targets:
         return []
-
+    expanded: list[str] = []
+    for target in raw_targets:
+        if is_cidr(target):
+            expanded.extend(expand_cidr(target))
+        else:
+            expanded.append(target)
+    raw_targets = expanded
+    raw_targets = await _expand_wildcards(raw_targets, max(args.workers, 1))
+    if not raw_targets:
+        return []
     targets = _dedupe([normalize_url(target) for target in raw_targets])
-    matchers = build_matchers(args.sigdb, use_sources=not args.no_sources)
+    matchers = build_matchers(
+        args.sigdb, use_sources=not args.no_sources, use_builtin=not args.no_builtin
+    )
     analyzer = TechAnalyzer(matchers)
     geo = GeoProvider(args.geoip_db)
-
+    full = args.full
     options = ScanOptions(
         timeout=args.timeout,
         user_agent=args.user_agent,
@@ -122,22 +321,145 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         tls=not args.no_tls,
         geo=not args.no_geo,
         probe=not args.no_probe,
+        cve=not args.no_cve,
+        cve_online=args.cve_online and (not getattr(args, "no_cve_online", False)),
+        ports=(args.ports or full) and (not getattr(args, "no_ports", False)),
+        subdomains=(args.subdomains or full) and (not getattr(args, "no_subdomains", False)),
+        ip_info=not args.no_ip_info,
+        default_creds=(args.default_creds or full) and (not getattr(args, "no_creds", False)),
+        port_timeout=args.port_timeout,
+        prefer_nmap=not args.no_nmap,
+        workers=max(args.workers, 1),
+        subdomain_limit=max(args.subdomain_limit, 0),
+        cred_limit=max(args.cred_limit, 0),
+        ct_logs=not getattr(args, "no_ct", False),
+        concurrency=max(args.concurrency, 1),
+        full=full,
+        smart_scan=full,
+        discover_sites=full,
+        site_limit=max(args.site_limit, 0),
     )
-    semaphore = asyncio.Semaphore(max(args.concurrency, 1))
+    from typing import Any
 
-    async with StackscanSession() as session:
-        tasks = [
-            scan_target(
-                target,
-                matchers_analyzer=analyzer,
-                session=session,
-                options=options,
-                geo=geo,
-                semaphore=semaphore,
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        TimeElapsedColumn,
+    )
+
+    err_console = Console(stderr=True)
+    total_targets = len(targets)
+    completed = 0
+
+    async def scan_one(
+        target: str,
+        progress_obj: Progress | None = None,
+        task_id: Any | None = None,
+        stage_total: int = 1,
+    ) -> ScanReport:
+        nonlocal completed
+        if args.verbose == 1:
+            err_console.print(f"[{theme.MUTED}][*] Starting scan of {target}...[/]")
+
+        stage_log: Callable[[str], None] | None = None
+        if args.verbose >= 2 and progress_obj is not None and task_id is not None:
+
+            def _stage_log(message: str, _t: str = target) -> None:
+                progress_obj.update(
+                    task_id,
+                    advance=1,
+                    description=f"[~] {_t} · {message}",
+                )
+
+            stage_log = _stage_log
+            progress_obj.update(task_id, description=f"[~] {target} · starting...")
+
+        report = await scan_target(
+            target,
+            matchers_analyzer=analyzer,
+            session=session,
+            options=options,
+            geo=geo,
+            semaphore=semaphore,
+            log=stage_log,
+        )
+
+        completed += 1
+
+        findings: list[str] = []
+        if report.error:
+            findings.append(f"error: {report.error}")
+        else:
+            if report.status is not None:
+                findings.append(f"status {report.status}")
+            tech_count = len(report.technologies)
+            if tech_count:
+                findings.append(f"{tech_count} tech")
+            if report.ports:
+                open_ports = len(report.ports.ports)
+                if open_ports:
+                    findings.append(f"{open_ports} port(s)")
+            if report.subdomains:
+                findings.append(f"{len(report.subdomains)} subdomain(s)")
+            if report.site_findings:
+                findings.append(f"{len(report.site_findings)} site(s)")
+
+        summary_str = ", ".join(findings)
+        if args.verbose == 1:
+            err_console.print(
+                f"[{theme.SUCCESS}][+][/] [{completed}/{total_targets}] Finished {target} in {_fmt_elapsed(report.elapsed or 0)} ({summary_str})",
+                highlight=False,
             )
-            for target in targets
-        ]
-        return list(await asyncio.gather(*tasks))
+
+        if progress_obj is not None and task_id is not None:
+            if args.verbose >= 2:
+                progress_obj.update(task_id, completed=stage_total, description=f"[+] {target}")
+            else:
+                progress_obj.update(task_id, advance=1, description=f"Scanning: {target}")
+
+        return report
+
+    _stage_count = 7
+    semaphore = asyncio.Semaphore(max(args.concurrency, 1))
+    async with StackscanSession() as session:
+        if not args.json_output:
+            transient = args.verbose < 2
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TimeElapsedColumn(),
+                console=err_console,
+                transient=transient,
+            ) as progress:
+                if args.verbose >= 2:
+                    task_ids = {
+                        target: progress.add_task(f"[~] {target}", total=_stage_count)
+                        for target in targets
+                    }
+                    tasks = [
+                        scan_one(target, progress, task_ids[target], _stage_count)
+                        for target in targets
+                    ]
+                else:
+                    task_id = progress.add_task("Scanning targets...", total=total_targets)
+                    tasks = [scan_one(target, progress, task_id) for target in targets]
+                return list(await asyncio.gather(*tasks))
+        else:
+            tasks = [scan_one(target) for target in targets]
+            return list(await asyncio.gather(*tasks))
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    if seconds < 90:
+        return f"{seconds:.2f}s"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    return f"{minutes}m {secs}s ({seconds:.0f}s)"
 
 
 def _infra_summary(report: ScanReport) -> str:
@@ -173,18 +495,23 @@ def _render_table(reports: list[ScanReport], show_empty: bool) -> None:
     console = Console()
     table = Table(title="Stackscan Report")
     table.add_column("Target", style="cyan", overflow="fold")
+    table.add_column("IPs", overflow="fold")
     table.add_column("Status", justify="right")
     table.add_column("Infrastructure")
     table.add_column("Technologies")
     table.add_column("Exposure")
     table.add_column("Error", style="red")
-
     for report in reports:
         has_findings = bool(report.technologies) or bool(report.infra.server or report.infra.cdn)
-        if not show_empty and not has_findings and not report.error:
+        if not show_empty and (not has_findings) and (not report.error):
             continue
+        ips: list[str] = []
+        if report.network is not None:
+            ips.extend(report.network.ipv4)
+            ips.extend(report.network.ipv6)
         table.add_row(
             report.final_url or report.url,
+            ", ".join(ips) if ips else "-",
             str(report.status) if report.status is not None else "-",
             _infra_summary(report),
             _format_detected(report.by_category()),
@@ -194,74 +521,188 @@ def _render_table(reports: list[ScanReport], show_empty: bool) -> None:
     console.print(table)
 
 
-def _render_json(reports: list[ScanReport]) -> None:
-    payload = {
+def _payload(
+    reports: list[ScanReport], elapsed: float, include_graph: bool = False
+) -> dict[str, object]:
+    payload: dict[str, object] = {
         "scanner": "stackscan",
         "version": __version__,
         "generated_at": datetime.now(UTC).isoformat(),
+        "elapsed_seconds": round(elapsed, 3),
         "results": [report.to_dict() for report in reports],
     }
-    json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
+    if include_graph:
+        from typing import Any, cast
+
+        from stackscan.export import build_graph
+
+        payload["graph"] = build_graph(cast("list[dict[str, Any]]", payload["results"]))
+    return payload
+
+
+def _render_json(reports: list[ScanReport], elapsed: float, include_graph: bool = False) -> None:
+    json.dump(_payload(reports, elapsed, include_graph), sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")
 
 
+_EXPORTERS: dict[str, tuple[str, str]] = {
+    "json": ("json", "to_json"),
+    "xml": ("xml", "to_xml"),
+    "html": ("html", "to_html"),
+}
+
+
+def _write_exports(
+    reports: list[ScanReport],
+    elapsed: float,
+    spec: str,
+    output: str,
+    console: Console,
+    include_graph: bool = False,
+) -> None:
+    from stackscan import export
+
+    requested: list[str] = []
+    for token in spec.replace(" ", ",").split(","):
+        fmt = token.strip().lower()
+        if not fmt:
+            continue
+        if fmt not in _EXPORTERS:
+            _warn(console, f"unknown --export format: {fmt} (known: json, xml, html)")
+            continue
+        requested.append(fmt)
+    for fmt in dict.fromkeys(requested):
+        ext, func = _EXPORTERS[fmt]
+        payload = _payload(reports, elapsed, include_graph=(include_graph and fmt == "json"))
+        text: str = getattr(export, func)(payload)
+        out = Path(f"{output}.{ext}")
+        out.write_text(text, encoding="utf-8")
+        console.print(f"[{theme.SUCCESS}][+][/] wrote {out}", highlight=False)
+
+
+def _scan_summary(reports: list[ScanReport], elapsed: float) -> str:
+    targets = len(reports)
+    cves = sum(len(report.cves) for report in reports)
+    critical = sum(
+        1 for report in reports for cve in report.cves if cve.severity.upper() == "CRITICAL"
+    )
+    exposed = sum(
+        1
+        for report in reports
+        for finding in report.creds
+        if finding.kind in ("default-creds", "open-no-auth")
+    )
+    ports = sum(len(report.ports.ports) for report in reports if report.ports is not None)
+    subdomains = sum(len(report.subdomains) for report in reports)
+    sites = sum(len(report.site_findings) for report in reports)
+    parts = [f"[bold]{targets}[/bold] target(s)", f"[bold]{cves}[/bold] CVE(s)"]
+    if critical:
+        parts.append(f"[bold {theme.DANGER}]{critical} critical[/]")
+    if ports:
+        parts.append(f"[bold]{ports}[/bold] open port(s)")
+    if subdomains:
+        parts.append(f"[bold]{subdomains}[/bold] subdomain(s)")
+    if sites:
+        parts.append(f"[bold]{sites}[/bold] site(s)")
+    if exposed:
+        parts.append(f"[bold {theme.DANGER}]{exposed} exposed device(s)[/]")
+    parts.append(f"done in [{theme.ACCENT}]{_fmt_elapsed(elapsed)}[/]")
+    return "  ·  ".join(parts)
+
+
+def _warn(console: Console, message: str) -> None:
+    console.print(f"[{theme.WARN}][!][/] {message}", highlight=False)
+
+
+def _error(console: Console, message: str) -> None:
+    console.print(f"[{theme.DANGER}][x][/] {message}", highlight=False)
+
+
+def _increase_nofile_limit() -> None:
+    try:
+        import resource
+
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        target = min(hard, 8192) if hard != resource.RLIM_INFINITY else 8192
+        if soft < target:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+    except Exception:
+        pass
+
+
 def _scan_command(argv: list[str]) -> int:
+    _increase_nofile_limit()
+    verbose_level, argv = _extract_verbose(argv)
     parser = _build_scan_parser()
     args = parser.parse_args(argv)
-
+    args.verbose = verbose_level
+    err_console = Console(stderr=True)
+    _apply_no(args, err_console)
+    if not args.no_banner:
+        render_banner(err_console)
+    if (args.ports or args.full) and (not args.no_nmap) and (not nmap_available()):
+        _warn(err_console, "nmap not found — using the built-in Python connect scan.")
+    if args.default_creds or args.full:
+        _warn(
+            err_console,
+            "default-credential checks enabled — only scan systems you are authorized to test.",
+        )
+    started = time.perf_counter()
     try:
         reports = asyncio.run(_run_scans(args))
     except FileNotFoundError as exc:
-        Console(stderr=True).print(f"[red]{exc}[/red]")
+        _error(err_console, str(exc))
         return 2
     except NoSignaturesError as exc:
-        Console(stderr=True).print(f"[red]{exc}[/red]")
+        _error(err_console, str(exc))
         return 2
-    except Exception as exc:  # noqa: BLE001 - CLI fallback
-        Console(stderr=True).print(f"[red]Failed to scan: {exc}[/red]")
+    except Exception as exc:
+        _error(err_console, f"Failed to scan: {exc}")
         return 1
-
+    elapsed = time.perf_counter() - started
     if not reports:
-        Console(stderr=True).print("[yellow]No targets provided.[/yellow]")
+        _warn(err_console, "No targets provided.")
         return 2
-
+    if args.export:
+        _write_exports(
+            reports, elapsed, args.export, args.output, err_console, include_graph=args.json_graph
+        )
     if args.json_output:
-        _render_json(reports)
-    else:
+        _render_json(reports, elapsed, include_graph=args.json_graph)
+    elif args.compact:
         _render_table(reports, args.show_empty)
+        err_console.print(_scan_summary(reports, elapsed))
+    else:
+        render_reports(reports, Console(), show_empty=args.show_empty)
+        err_console.print(_scan_summary(reports, elapsed))
     return 0
 
 
-# --------------------------------------------------------------------------- #
-# sigdb source-management command
-# --------------------------------------------------------------------------- #
 def _sigdb_command(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
-        prog="stackscan sigdb", description="Manage signature sources."
+        prog="stackscan sigdb",
+        description="Manage signature sources.",
+        add_help=False,
+    )
+    parser.add_argument(
+        "-h", "--help", action=_HelpAction, nargs=0, help="Show this help message and exit."
     )
     sub = parser.add_subparsers(dest="action", required=True)
-
     add_p = sub.add_parser("add", help="Add a signature source (http URL or git repo).")
     add_p.add_argument("url", help="Source URL: .sigdb, rules JSON, or a git repository.")
-
     sub.add_parser("list", help="List configured sources.")
-
     remove_p = sub.add_parser("remove", help="Remove a source by id or url.")
     remove_p.add_argument("key", help="Source id or url.")
-
     update_p = sub.add_parser("update", help="Re-fetch and recompile a source (or all).")
     update_p.add_argument("key", nargs="?", help="Source id or url; omit to update all.")
-
     args = parser.parse_args(argv)
     store = SourceStore()
     console = Console()
-
     try:
         if args.action == "add":
             source = store.add(args.url)
             console.print(
-                f"[green]Added[/green] {args.url} "
-                f"([cyan]{source.kind}[/cyan], id={source.id}) -> {source.path}"
+                f"[green]Added[/green] {args.url} ([cyan]{source.kind}[/cyan], id={source.id}) -> {source.path}"
             )
             return 0
         if args.action == "list":
@@ -297,13 +738,9 @@ def _sigdb_command(argv: list[str]) -> int:
     except SourceError as exc:
         Console(stderr=True).print(f"[red]{exc}[/red]")
         return 1
-
     return 2
 
 
-# --------------------------------------------------------------------------- #
-# Entry point
-# --------------------------------------------------------------------------- #
 def main(argv: Iterable[str] | None = None) -> int:
     args = list(argv) if argv is not None else sys.argv[1:]
     if args and args[0] == "sigdb":

@@ -1,5 +1,3 @@
-"""Security header presence analysis (read-only)."""
-
 from __future__ import annotations
 
 from stackscan.types import Headers, SecurityHeaders

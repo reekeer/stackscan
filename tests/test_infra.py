@@ -1,5 +1,3 @@
-"""Tests for edge-infrastructure heuristics."""
-
 from __future__ import annotations
 
 from stackscan.analyzers import analyze_infra

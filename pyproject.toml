@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "stackscan"
-description = "Stackscan - lightweight Wappalyzer-like stack detector."
+description = "Full web stack, infrastructure, DNS, port, subdomain and CVE analyzer."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -20,7 +20,9 @@ maintainers = [
 dependencies = [
   "rich>=13.7",
   "aiohttp>=3.9",
-  "sigdb@git+https://github.com/reekeer/sigdb.git"
+  "dnspython>=2.6",
+  "python-nmap>=0.7",
+  "sigdb>=1.0.2"
 ]
 
 classifiers = [
@@ -44,9 +46,6 @@ keywords = [
 ]
 
 [project.optional-dependencies]
-dns = [
-  "dnspython>=2.6"
-]
 geo = [
   "geoip2>=4.8"
 ]
@@ -54,7 +53,11 @@ dev = [
   "ruff>=0.5",
   "black>=24.0",
   "pyright>=1.1",
-  "pytest>=8.0"
+  "pytest>=8.0",
+  "twine>=5.0",
+  "build>=1.0",
+  "cibuildwheel>=2.16",
+  "geoip2>=4.8"
 ]
 
 [project.urls]
@@ -64,7 +67,6 @@ Issues = "https://github.com/reekeer/stackscan/issues"
 [project.scripts]
 stackscan = "stackscan.cli:main"
 
-
 [tool.hatch.version]
 path = "src/stackscan/__init__.py"
 
@@ -73,21 +75,27 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/stackscan"]
-
-[tool.hatch.envs.default]
-dependencies = [
-  "ruff",
-  "black",
-  "pyright",
-  "pytest"
+artifacts = [
+  "src/stackscan/data/*.sigdb",
+  "src/stackscan/data/*.json.gz",
+  "src/stackscan/data/*.txt",
+  "src/stackscan/data/*.png",
 ]
 
-[tool.hatch.envs.default.scripts]
-lint = "ruff check ."
-format = "black ."
-types = "pyright"
-test = "pytest"
-
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/stackscan",
+  "scripts",
+  "tests",
+  "README.md",
+  "LICENSE",
+]
+artifacts = [
+  "src/stackscan/data/*.sigdb",
+  "src/stackscan/data/*.json.gz",
+  "src/stackscan/data/*.txt",
+  "src/stackscan/data/*.png",
+]
 
 [tool.black]
 line-length = 100
@@ -138,7 +146,10 @@ exclude = [
   "node_modules",
   "**/__pycache__",
   "build",
-  "dist", "**/.*", ".venv"
+  "dist",
+  ".*",
+  ".venv",
+  "src/stackscan/export.py"
 ]
 
 reportMissingImports = true
@@ -146,3 +157,18 @@ reportMissingTypeStubs = false
 reportOptionalMemberAccess = true
 reportOptionalSubscript = true
 reportGeneralTypeIssues = true
+
+[tool.cibuildwheel]
+build = "cp311-* cp312-* cp313-*"
+skip = "*-musllinux* *-win32"
+test-command = "pytest {project}/tests"
+test-extras = ["dev"]
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64", "aarch64"]
+
+[tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]

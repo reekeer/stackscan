@@ -1,8 +1,20 @@
-"""URL helpers."""
-
 from __future__ import annotations
 
+import ipaddress
 from urllib.parse import urlparse
+
+
+def is_cidr(raw: str) -> bool:
+    try:
+        ipaddress.ip_network(raw, strict=False)
+    except ValueError:
+        return False
+    return "/" in raw
+
+
+def expand_cidr(raw: str) -> list[str]:
+    network = ipaddress.ip_network(raw, strict=False)
+    return [str(host) for host in network]
 
 
 def normalize_url(raw: str) -> str:
@@ -12,15 +24,11 @@ def normalize_url(raw: str) -> str:
 
 
 def host_of(url: str) -> str:
-    """Return the bare hostname of a URL (no port, no scheme)."""
-
     parsed = urlparse(url if "://" in url else "https://" + url)
     return (parsed.hostname or "").lower()
 
 
 def port_of(url: str) -> int:
-    """Return the explicit or default HTTPS port for a URL."""
-
     parsed = urlparse(url)
     if parsed.port is not None:
         return parsed.port

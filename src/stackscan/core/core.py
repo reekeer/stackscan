@@ -1,11 +1,10 @@
-"""Core session for stackscan."""
-
 from __future__ import annotations
 
 from collections.abc import Iterable
 
 from aiohttp import ClientSession, ClientTimeout
 
+from stackscan.net.resolver import build_connector
 from stackscan.types import FetchResult
 
 
@@ -14,13 +13,11 @@ def _lower_headers(items: Iterable[tuple[str, str]]) -> dict[str, str]:
 
 
 class StackscanSession:
-    """Holds an aiohttp ClientSession with stackscan defaults and helpers."""
-
     def __init__(self) -> None:
         self._session: ClientSession | None = None
 
     async def __aenter__(self) -> StackscanSession:
-        self._session = ClientSession()
+        self._session = ClientSession(connector=build_connector())
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -29,18 +26,11 @@ class StackscanSession:
             self._session = None
 
     async def fetch(
-        self,
-        url: str,
-        *,
-        timeout: float,
-        user_agent: str,
-        insecure: bool,
-        max_bytes: int,
+        self, url: str, *, timeout: float, user_agent: str, insecure: bool, max_bytes: int
     ) -> FetchResult:
         session = self._session
         if session is None:
             raise RuntimeError("StackscanSession is not entered")
-
         async with session.get(
             url,
             headers={"User-Agent": user_agent},
@@ -54,16 +44,17 @@ class StackscanSession:
             cookies = resp.headers.getall("Set-Cookie", [])
             charset = resp.charset or "utf-8"
             body_bytes = await resp.content.read(max_bytes)
-            # Drain the rest of the body so the connection can be reused.
             while await resp.content.read(8192):
                 pass
             body = body_bytes.decode(charset, errors="replace")
             url_final = str(resp.url)
-
+            version = resp.version
+            http_version = f"{version.major}.{version.minor}" if version else None
         return FetchResult(
             url=url_final,
             status=status,
             headers={"_raw": "\n".join(raw_headers), **headers},
             body=body,
             cookies=tuple(cookies),
+            http_version=http_version,
         )

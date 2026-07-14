@@ -1,18 +1,8 @@
-"""Heuristic detection of edge infrastructure: CDN, WAF, reverse proxy, server.
-
-These rules only read what a server voluntarily returns in its response headers
-and cookies. Nothing here probes, fuzzes, or attempts to bypass a protection --
-it is pure interpretation of publicly returned metadata.
-"""
-
 from __future__ import annotations
 
 from stackscan.types import Headers, InfraInfo
 
-# (label, header_name, needle). needle=None means "header present is enough";
-# otherwise the (lowercased) header value must contain the needle.
 _Signature = tuple[str, str, str | None]
-
 CDN_SIGNATURES: tuple[_Signature, ...] = (
     ("Cloudflare", "server", "cloudflare"),
     ("Cloudflare", "cf-ray", None),
@@ -32,7 +22,6 @@ CDN_SIGNATURES: tuple[_Signature, ...] = (
     ("Sucuri", "x-sucuri-id", None),
     ("StackPath", "x-hw", None),
 )
-
 WAF_SIGNATURES: tuple[_Signature, ...] = (
     ("Cloudflare", "cf-ray", None),
     ("Sucuri", "x-sucuri-id", None),
@@ -44,8 +33,6 @@ WAF_SIGNATURES: tuple[_Signature, ...] = (
     ("Barracuda", "server", "barracuda"),
     ("AWS WAF", "x-amzn-waf-action", None),
 )
-
-# Reverse-proxy / origin server software.
 SERVER_SIGNATURES: tuple[_Signature, ...] = (
     ("nginx", "server", "nginx"),
     ("Apache", "server", "apache"),
@@ -90,19 +77,10 @@ def _cookie_names(cookies: tuple[str, ...]) -> list[str]:
 def _proxy_notes(headers: Headers, host: str) -> list[str]:
     notes: list[str] = []
     server = (headers.get("server") or "").lower()
-
     if "via" in headers:
         notes.append(f"Via header present: {headers['via']}")
-
-    # Nginx Proxy Manager fronts apps with OpenResty and typically strips origin
-    # headers, so an OpenResty server with no application fingerprint is a strong
-    # hint. Not definitive -- reported as a note, not a hard detection.
     if "openresty" in server:
         notes.append("OpenResty edge (commonly Nginx Proxy Manager)")
-
-    # A reverse proxy that reflects the requested host back in a header often
-    # indicates virtual-host routing (e.g. Nginx Proxy Manager forwarding by
-    # Host). We only flag exact host/subdomain reflection.
     host = host.lower()
     for name, value in headers.items():
         if name == "_raw":
@@ -111,7 +89,6 @@ def _proxy_notes(headers: Headers, host: str) -> list[str]:
         if host and (low == host or low.endswith("." + host) or host in low.split()):
             notes.append(f"Header '{name}' reflects requested host (reverse proxy likely)")
             break
-
     return notes
 
 
@@ -119,10 +96,8 @@ def analyze_infra(headers: Headers, cookies: tuple[str, ...], host: str) -> Infr
     cdn = _collect(headers, CDN_SIGNATURES)
     waf = _collect(headers, WAF_SIGNATURES)
     server = _collect(headers, SERVER_SIGNATURES)
-
     proxy: list[str] = []
     notes = _proxy_notes(headers, host)
-
     cookie_names = _cookie_names(cookies)
     if any(name.startswith("bigipserver") for name in cookie_names):
         if "F5 BIG-IP" not in waf:
@@ -131,16 +106,9 @@ def analyze_infra(headers: Headers, cookies: tuple[str, ...], host: str) -> Infr
     if "__cfduid" in cookie_names or "__cf_bm" in cookie_names:
         if "Cloudflare" not in cdn:
             cdn.append("Cloudflare")
-
-    # Anything acting as a front (CDN/WAF/OpenResty/Traefik/Envoy) is a proxy.
     for label in ("OpenResty", "Envoy", "HAProxy", "Traefik", "Apache Traffic Server"):
         if label in server and label not in proxy:
             proxy.append(label)
-
     return InfraInfo(
-        cdn=tuple(cdn),
-        waf=tuple(waf),
-        proxy=tuple(proxy),
-        server=tuple(server),
-        notes=tuple(notes),
+        cdn=tuple(cdn), waf=tuple(waf), proxy=tuple(proxy), server=tuple(server), notes=tuple(notes)
     )

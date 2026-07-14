@@ -1,12 +1,3 @@
-"""Optional, offline IP geolocation.
-
-Geolocation is opt-in and dependency-free by default. If the ``geoip2`` package
-is installed and a MaxMind ``.mmdb`` database is provided (via the constructor or
-the ``STACKSCAN_GEOIP_DB`` environment variable), lookups return country / city
-data. Otherwise lookups return an empty mapping. No third-party network service
-is ever contacted, so scans stay reproducible and privacy-preserving.
-"""
-
 from __future__ import annotations
 
 import os
@@ -33,7 +24,7 @@ class GeoProvider:
             self._unavailable = True
             return None
         try:
-            from geoip2 import database as _geoip_db  # type: ignore[import-untyped]
+            from geoip2 import database as _geoip_db
         except ImportError:
             self._unavailable = True
             return None

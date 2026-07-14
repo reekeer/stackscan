@@ -1,5 +1,3 @@
-"""Tests for signature source management."""
-
 from __future__ import annotations
 
 import json

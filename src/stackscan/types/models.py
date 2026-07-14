@@ -1,5 +1,3 @@
-"""Core data models."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -17,3 +15,4 @@ class FetchResult:
     headers: Headers
     body: str
     cookies: Cookies
+    http_version: str | None = None

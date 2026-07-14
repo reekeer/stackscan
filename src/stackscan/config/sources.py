@@ -1,17 +1,3 @@
-"""Signature-source management for stackscan.
-
-A *source* is a place stackscan pulls signatures from. Two transports are
-supported:
-
-* ``http`` -- a URL returning either a compiled ``.sigdb`` file or a rules JSON
-  document that stackscan compiles locally.
-* ``git`` -- a repository that contains a compiled ``.sigdb`` or a rules JSON
-  file (``sigdb.json`` / ``rules.json``), cloned and compiled locally.
-
-Sources are recorded in ``$XDG_CONFIG_HOME/stackscan/sources.json`` and their
-compiled databases are cached under ``$XDG_CACHE_HOME/stackscan/sources``.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -33,15 +19,15 @@ _DOWNLOAD_CHUNK_SIZE = 8192
 
 
 class SourceError(RuntimeError):
-    """Raised when a source cannot be added, updated, or resolved."""
+    pass
 
 
 @dataclass(frozen=True)
 class Source:
     id: str
     url: str
-    kind: str  # "http" | "git"
-    path: str  # local compiled .sigdb
+    kind: str
+    path: str
     added: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -129,24 +115,17 @@ class SourceStore:
         url = url.strip()
         if not url:
             raise SourceError("empty source url")
-
         kind = "git" if _looks_like_git(url) else "http"
         source_id = _source_id(url)
         dest = self._cache / source_id
         dest.mkdir(parents=True, exist_ok=True)
         compiled = dest / "signatures.sigdb"
-
         if kind == "git":
             _materialize_git(url, dest, compiled)
         else:
             _materialize_http(url, compiled)
-
         source = Source(
-            id=source_id,
-            url=url,
-            kind=kind,
-            path=str(compiled),
-            added=int(time.time()),
+            id=source_id, url=url, kind=kind, path=str(compiled), added=int(time.time())
         )
         sources = [s for s in self.list() if s.id != source_id]
         sources.append(source)
@@ -238,19 +217,16 @@ def _materialize_git(url: str, dest: Path, output: Path) -> None:
         raise SourceError("git is not installed") from exc
     except subprocess.CalledProcessError as exc:
         raise SourceError(f"git clone failed: {exc.stderr.strip()}") from exc
-
     prebuilt = sorted(checkout.rglob("*.sigdb"))
     if prebuilt:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(prebuilt[0].read_bytes())
         return
-
     for name in _RULES_FILENAMES:
         candidate = checkout / name
         if candidate.is_file():
             _compile_rules_bytes(candidate.read_bytes(), output)
             return
-
     raise SourceError("repository has no .sigdb or rules JSON (sigdb.json/rules.json)")
 
 

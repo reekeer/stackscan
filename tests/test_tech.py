@@ -1,5 +1,3 @@
-"""Tests for sigdb-backed technology detection."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -42,11 +40,7 @@ def test_detects_multiple_technologies(tmp_path: Path) -> None:
 def test_evidence_recorded(tmp_path: Path) -> None:
     analyzer = TechAnalyzer([_matcher(tmp_path)])
     result = FetchResult(
-        url="https://example.com",
-        status=200,
-        headers={"server": "nginx"},
-        body="",
-        cookies=(),
+        url="https://example.com", status=200, headers={"server": "nginx"}, body="", cookies=()
     )
     techs = analyzer.detect(result)
     nginx = next(tech for tech in techs if tech.name == "nginx")
