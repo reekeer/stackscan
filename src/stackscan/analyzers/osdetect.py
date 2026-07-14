@@ -106,7 +106,12 @@ def detect_os(report: ScanReport) -> list[OsFinding]:
         for os, src in pairs:
             by_source.setdefault(src, []).append(os)
         dominant_source = max(by_source, key=lambda s: len(by_source[s]))
-        category = "network" if dominant_source.startswith("port") else "banner"
+        if dominant_source == "port-banner" or dominant_source.startswith(("header:", "meta:", "script")):
+            category = "banner"
+        elif dominant_source.startswith("port "):
+            category = "network"
+        else:
+            category = "banner"
         service = dominant_source
         findings.append(
             OsFinding(
