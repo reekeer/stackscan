@@ -13,6 +13,7 @@ class Technology:
     evidence: tuple[str, ...] = ()
     location: str = ""
     confidence: int = 100
+    version: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -21,6 +22,7 @@ class Technology:
             "evidence": list(self.evidence),
             "location": self.location,
             "confidence": self.confidence,
+            "version": self.version,
         }
 
 

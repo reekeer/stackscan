@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from stackscan.types import FetchResult, Technology
 from stackscan.utils import host_of
 
 if TYPE_CHECKING:
     from sigdb.core import SigDBMatcher
-    from sigdb.types import SigDBMatchResult
+    from sigdb.types import SigDBItem, SigDBMatchResult
 _META_RE = re.compile("<meta\\b([^>]*)>", re.IGNORECASE)
 _SCRIPT_SRC_RE = re.compile("<script\\b[^>]*\\bsrc\\s*=\\s*[\\\"']?([^\\\"'\\s>]+)", re.IGNORECASE)
 _ATTR_RE = re.compile(
@@ -57,6 +57,7 @@ class _Hit:
     name: str
     category: str | None = None
     evidence: list[str] = field(default_factory=list[str])
+    item: SigDBItem | None = None
 
 
 _EVIDENCE_WEIGHTS: tuple[tuple[str, int], ...] = (
@@ -82,6 +83,71 @@ def _confidence(evidence: list[str]) -> int:
         return 60
     best = max(_evidence_weight(item) for item in evidence)
     return min(100, best + 2 * (len(set(evidence)) - 1))
+
+
+_VERSION_RE = re.compile(r"(\d+\.\d+(?:\.\d+)?(?:[-+.]?[a-zA-Z0-9]+)?)")
+
+
+def _version_key(version: str) -> tuple[int, int, int, int]:
+    parts: list[int] = []
+    for chunk in re.split(r"[.\-_+]", version):
+        num = ""
+        for ch in chunk:
+            if ch.isdigit():
+                num += ch
+            else:
+                break
+        parts.append(int(num) if num else 0)
+    while len(parts) < 4:
+        parts.append(0)
+    return (parts[0], parts[1], parts[2], parts[3])
+
+
+def _infer_version(item: SigDBItem | None, evidence: list[str]) -> str | None:
+    if item is None:
+        return _version_from_evidence(evidence)
+    versions: dict[str, Any] = getattr(item, "versions", None) or {}
+    if versions:
+        inferred = _version_from_sigdb(versions, evidence)
+        if inferred:
+            return inferred
+    return _version_from_evidence(evidence)
+
+
+def _version_from_sigdb(versions: dict[str, Any], evidence: list[str]) -> str | None:
+    matched: list[str] = []
+    for ev in evidence:
+        group, _, signal = ev.partition(":")
+        signal = signal.strip()
+        if not signal:
+            continue
+        group_map = versions.get(group)
+        if not isinstance(group_map, dict):
+            continue
+        group_dict = cast(dict[str, Any], group_map)
+        constraint = group_dict.get(signal)
+        if not isinstance(constraint, dict):
+            continue
+        constraint_dict = cast(dict[str, Any], constraint)
+        since = constraint_dict.get("since")
+        if isinstance(since, str):
+            matched.append(since)
+    if not matched:
+        return None
+    return max(matched, key=_version_key)
+
+
+def _version_from_evidence(evidence: list[str]) -> str | None:
+    candidates: list[str] = []
+    for ev in evidence:
+        value = ev.split(":", 1)[-1]
+        for match in _VERSION_RE.finditer(value):
+            candidate = match.group(1)
+            if len(candidate) >= 3 and not candidate.startswith("0."):
+                candidates.append(candidate)
+    if not candidates:
+        return None
+    return max(candidates, key=_version_key)
 
 
 _HEADER_TECH: tuple[tuple[str, str | None, str, str], ...] = (
@@ -140,7 +206,11 @@ class TechAnalyzer:
         headers = getattr(match.item, "headers", {}) or {}
         hit = acc.get(key)
         if hit is None:
-            hit = _Hit(name=headers.get("_name") or key, category=headers.get("_category"))
+            hit = _Hit(
+                name=headers.get("_name") or key,
+                category=headers.get("_category"),
+                item=match.item,
+            )
             acc[key] = hit
         if evidence not in hit.evidence:
             hit.evidence.append(evidence)
@@ -192,6 +262,7 @@ class TechAnalyzer:
                 evidence=tuple(hit.evidence),
                 location=location,
                 confidence=_confidence(hit.evidence),
+                version=_infer_version(hit.item, hit.evidence),
             )
             for hit in by_name.values()
         ]

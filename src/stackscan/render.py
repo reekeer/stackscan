@@ -261,6 +261,8 @@ def _tech_section(report: ScanReport) -> RenderableType | None:
         for tech in report.technologies:
             if category in (tech.categories or ("uncategorized",)):
                 label = tech.name
+                if tech.version:
+                    label += f" v{tech.version}"
                 if tech.location and tech.location != host_of(report.url):
                     label += f" @{tech.location}"
                 label += f" [{theme.MUTED}]({tech.confidence}%)[/]"
