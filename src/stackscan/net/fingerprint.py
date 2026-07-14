@@ -32,9 +32,11 @@ def sanitize_banner(text: str) -> str:
 
 def extract_distro(text: str) -> str | None:
     lower = text.lower()
-    ubuntu_match = re.search(r"(?:\dubuntu|0ubuntu0?[._])(\d[\d.]+)", lower)
+    ubuntu_match = re.search(r"0ubuntu0[._](\d[\d.]+)", lower)
     if ubuntu_match:
         return f"Ubuntu {ubuntu_match.group(1)}"
+    if "ubuntu" in lower:
+        return "Ubuntu"
     debian_match = re.search(r"\+?deb(\d+)u?(\d+)?", lower)
     if debian_match:
         return f"Debian {debian_match.group(1)}"
