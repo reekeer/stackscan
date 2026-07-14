@@ -40,6 +40,8 @@ _DEVICE_KEYWORDS = (
     "network camera",
     "surveillance",
     "uc-httpd",
+    "go2rtc",
+    "rtsp",
 )
 _CAMERA_KEYWORDS = (
     "camera",
@@ -57,6 +59,8 @@ _CAMERA_KEYWORDS = (
     "webcamxp",
     "network camera",
     "surveillance",
+    "go2rtc",
+    "rtsp",
 )
 _BUILTIN_CREDS: tuple[tuple[str, str], ...] = (
     ("admin", "admin"),
@@ -122,6 +126,9 @@ def load_default_creds() -> tuple[tuple[str, str], ...]:
     return tuple(combined)
 
 
+_RTSP_PORTS: frozenset[int] = frozenset({554, 8554})
+
+
 def _http_ports(scan: PortScan | None) -> list[tuple[int, bool]]:
     if scan is None:
         return []
@@ -130,7 +137,12 @@ def _http_ports(scan: PortScan | None) -> list[tuple[int, bool]]:
         service = (port.service or "").lower()
         if port.port in (443, 8443, 2083) or "https" in service or "ssl" in service:
             out.append((port.port, True))
-        elif "http" in service or port.port in (80, 8080, 8000, 8081, 8888, 9000, 631, 7547):
+        elif (
+            "http" in service
+            or port.port in (80, 8080, 8000, 8081, 8888, 9000, 631, 7547)
+            or port.port in _RTSP_PORTS
+            or "rtsp" in service
+        ):
             out.append((port.port, False))
     return out
 
@@ -193,7 +205,7 @@ async def _probe_endpoint(
             realm = resp.headers.get("WWW-Authenticate", "")
     except (aiohttp.ClientError, TimeoutError, OSError):
         return None
-    device = _looks_like_device(realm, server)
+    device = _looks_like_device(realm, server) or port in _RTSP_PORTS
     if status != 401:
         if device or _looks_like_device("", server):
             return CredFinding(
@@ -210,7 +222,7 @@ async def _probe_endpoint(
         port=port,
         tls=tls,
         service=f"{scheme} ({server or realm or 'device'})",
-        is_camera=_is_camera(realm, server),
+        is_camera=_is_camera(realm, server) or port in _RTSP_PORTS,
     )
 
 
