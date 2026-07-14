@@ -12,8 +12,8 @@ from stackscan.analyzers import (
     analyze_exposure,
     analyze_infra,
     analyze_security_headers,
-    check_default_creds,
     classify_services,
+    detect_devices,
     extract_software,
     match_cves,
     match_cves_online,
@@ -31,6 +31,7 @@ from stackscan.net import (
     scan_ports,
 )
 from stackscan.types import (
+    BruteTarget,
     CredFinding,
     FetchResult,
     IpInfo,
@@ -366,23 +367,21 @@ async def _enrich_unique_ips(
     return await enrich_ips(tuple(unique), workers=options.workers, sources=sources)
 
 
-async def _check_default_creds_smart(
+async def _detect_creds_smart(
     report: ScanReport,
     options: ScanOptions,
-) -> list[CredFinding]:
+) -> tuple[list[CredFinding], list[BruteTarget]]:
     if not options.default_creds or report.ports is None:
-        return []
-    findings: list[CredFinding] = []
+        return ([], [])
     semaphore = asyncio.Semaphore(max(options.concurrency, 5))
 
-    async def one(host: str, scan: PortScan) -> list[CredFinding]:
+    async def one(host: str, scan: PortScan) -> tuple[list[CredFinding], list[BruteTarget]]:
         async with semaphore:
-            return await check_default_creds(
+            return await detect_devices(
                 host,
                 scan,
                 timeout=min(options.timeout, 8.0),
                 workers=max(options.workers // 10, 4),
-                cred_limit=options.cred_limit,
             )
 
     hosts: set[str] = set()
@@ -395,9 +394,12 @@ async def _check_default_creds_smart(
         hosts.add(sub.name)
 
     results = await asyncio.gather(*(one(host, report.ports) for host in hosts))
-    for result in results:
-        findings.extend(result)
-    return findings
+    findings: list[CredFinding] = []
+    candidates: list[BruteTarget] = []
+    for result_findings, result_candidates in results:
+        findings.extend(result_findings)
+        candidates.extend(result_candidates)
+    return (findings, candidates)
 
 
 async def scan_target(
@@ -518,10 +520,14 @@ async def scan_target(
             else _aval([])
         )
         ipinfo_coro = _enrich_unique_ips(report, options) if options.ip_info else _aval([])
-        creds_coro = _creds(report, host, options) if options.default_creds else _aval([])
-        online_cves, report.ip_info, report.creds = await asyncio.gather(
+        empty_creds: tuple[list[CredFinding], list[BruteTarget]] = ([], [])
+        creds_coro = (
+            _detect_creds(report, host, options) if options.default_creds else _aval(empty_creds)
+        )
+        online_cves, report.ip_info, creds_result = await asyncio.gather(
             online_coro, ipinfo_coro, creds_coro
         )
+        report.creds, report.brute_targets = creds_result
         if online_cves:
             report.cves = merge_cve_matches(report.cves, online_cves)
 
@@ -535,15 +541,16 @@ async def _aval(value: object) -> Any:
     return value
 
 
-async def _creds(report: ScanReport, host: str, options: ScanOptions) -> list[CredFinding]:
+async def _detect_creds(
+    report: ScanReport, host: str, options: ScanOptions
+) -> tuple[list[CredFinding], list[BruteTarget]]:
     if options.smart_scan:
-        return await _check_default_creds_smart(report, options)
+        return await _detect_creds_smart(report, options)
     if host and report.ports is not None:
-        return await check_default_creds(
+        return await detect_devices(
             host,
             report.ports,
             timeout=options.timeout,
             workers=max(options.workers // 10, 4),
-            cred_limit=options.cred_limit,
         )
-    return []
+    return ([], [])

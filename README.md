@@ -132,7 +132,8 @@ Below are performance benchmarks conducted on two production targets using diffe
 | `--subdomains` | off | Enumerate subdomains (AXFR + wordlist + TLS SANs). |
 | `--subdomain-limit` | `5000` | Max ranked labels to resolve (`0` = full list). |
 | `--site-limit` | `20` | Max derived sites to analyze from discovered open ports (`0` = unlimited). |
-| `--default-creds` | off | Bounded default-credential / open-device check. |
+| `--default-creds` | off | Bounded default-credential / open-device check (prompts before brute-forcing). |
+| `--full-auto` | off | Auto-accept every brute prompt on discovered devices (enables default-cred checks). |
 | `--cred-limit` | `50` | Max default-credential pairs per device (`0` = full SecLists list). |
 | `--cve-online` | off | Also query NVD live for detected products. |
 | `--parse-social` | off | Extract social media and contact links from the page. |

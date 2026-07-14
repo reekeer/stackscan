@@ -1,5 +1,6 @@
 from stackscan.types.models import Cookies, FetchResult, Headers
 from stackscan.types.output import (
+    BruteTarget,
     CredFinding,
     CveMatch,
     DetectedTech,
@@ -21,6 +22,7 @@ from stackscan.types.output import (
 )
 
 __all__ = [
+    "BruteTarget",
     "Cookies",
     "CredFinding",
     "CveMatch",

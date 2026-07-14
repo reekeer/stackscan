@@ -1,4 +1,4 @@
-from stackscan.analyzers.creds import check_default_creds
+from stackscan.analyzers.creds import brute_devices, detect_devices
 from stackscan.analyzers.cve import (
     extract_software,
     match_cves,
@@ -19,7 +19,8 @@ __all__ = [
     "analyze_exposure",
     "analyze_infra",
     "analyze_security_headers",
-    "check_default_creds",
+    "brute_devices",
+    "detect_devices",
     "classify_services",
     "port_category",
     "parse_social",

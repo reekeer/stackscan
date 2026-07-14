@@ -13,12 +13,12 @@ from rich.console import Console
 from rich.table import Table
 
 from stackscan import __version__, theme
-from stackscan.analyzers import TechAnalyzer
+from stackscan.analyzers import TechAnalyzer, brute_devices
 from stackscan.config import NoSignaturesError, SourceError, SourceStore, build_matchers
 from stackscan.net import GeoProvider, nmap_available
 from stackscan.render import render_banner, render_reports
 from stackscan.scan import ScanOptions, scan_target
-from stackscan.types import DetectedTech, ScanReport
+from stackscan.types import BruteTarget, CredFinding, DetectedTech, ScanReport
 from stackscan.utils import expand_cidr, is_cidr, normalize_url
 
 DEFAULT_TIMEOUT = 12.0
@@ -84,6 +84,12 @@ def _build_scan_parser() -> argparse.ArgumentParser:
         "--full",
         action="store_true",
         help="Deep scan: enable ports, subdomains, offline CVEs, IP info, and default-cred checks.",
+    )
+    parser.add_argument(
+        "--full-auto",
+        dest="full_auto",
+        action="store_true",
+        help="Auto-accept every brute prompt on discovered devices (enables default-cred checks).",
     )
     parser.add_argument(
         "--ports",
@@ -333,7 +339,8 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         ports=(args.ports or full) and (not getattr(args, "no_ports", False)),
         subdomains=(args.subdomains or full) and (not getattr(args, "no_subdomains", False)),
         ip_info=not args.no_ip_info,
-        default_creds=(args.default_creds or full) and (not getattr(args, "no_creds", False)),
+        default_creds=(args.default_creds or full or args.full_auto)
+        and (not getattr(args, "no_creds", False)),
         port_timeout=args.port_timeout,
         prefer_nmap=not args.no_nmap,
         workers=max(args.workers, 1),
@@ -637,6 +644,87 @@ def _increase_nofile_limit() -> None:
         pass
 
 
+def _brute_subject(cameras: int, devices: int) -> str:
+    parts: list[str] = []
+    if cameras:
+        parts.append(f"{cameras} open camera" + ("s" if cameras != 1 else ""))
+    if devices:
+        parts.append(f"{devices} device" + ("s" if devices != 1 else ""))
+    return " and ".join(parts) if parts else "device(s)"
+
+
+def _prompt_brute(cameras: int, devices: int, console: Console) -> bool:
+    console.print(
+        f"[{theme.WARN}][?][/] Parser found {_brute_subject(cameras, devices)}."
+        " Try to brute? Y(Yes)/N(No)",
+        highlight=False,
+    )
+    while True:
+        try:
+            answer = input("> ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        if answer in ("y", "yes"):
+            return True
+        if answer in ("n", "no", ""):
+            return False
+        console.print(f"[{theme.MUTED}]please answer y/yes or n/no[/]", highlight=False)
+
+
+async def _brute_pairs(
+    pairs: list[tuple[ScanReport, BruteTarget]], args: argparse.Namespace
+) -> list[tuple[ScanReport, list[CredFinding]]]:
+    semaphore = asyncio.Semaphore(max(args.concurrency, 1))
+
+    async def one(report: ScanReport, target: BruteTarget) -> tuple[ScanReport, list[CredFinding]]:
+        async with semaphore:
+            findings = await brute_devices(
+                [target],
+                timeout=min(args.timeout, 8.0),
+                workers=max(args.workers // 10, 4),
+                cred_limit=max(args.cred_limit, 0),
+            )
+        return (report, findings)
+
+    return list(await asyncio.gather(*(one(report, target) for report, target in pairs)))
+
+
+def _sort_creds(pairs: list[tuple[ScanReport, BruteTarget]]) -> None:
+    for report in {id(report): report for report, _ in pairs}.values():
+        report.creds.sort(
+            key=lambda f: (f.kind != "default-creds", f.kind != "open-no-auth", f.target)
+        )
+
+
+def _run_brute_phase(reports: list[ScanReport], args: argparse.Namespace, console: Console) -> None:
+    pairs = [(report, target) for report in reports for target in report.brute_targets]
+    if not pairs:
+        return
+    cameras = sum(1 for _, target in pairs if target.is_camera)
+    devices = len(pairs) - cameras
+    if args.full_auto:
+        accept = True
+    elif args.json_output:
+        accept = False
+    else:
+        accept = _prompt_brute(cameras, devices, console)
+    if not accept:
+        for report, target in pairs:
+            report.creds.append(
+                CredFinding(
+                    target=target.target,
+                    service=target.service,
+                    kind="auth-required",
+                    detail="brute-force skipped",
+                )
+            )
+        _sort_creds(pairs)
+        return
+    for report, findings in asyncio.run(_brute_pairs(pairs, args)):
+        report.creds.extend(findings)
+    _sort_creds(pairs)
+
+
 def _scan_command(argv: list[str]) -> int:
     _increase_nofile_limit()
     verbose_level, argv = _extract_verbose(argv)
@@ -649,7 +737,7 @@ def _scan_command(argv: list[str]) -> int:
         render_banner(err_console)
     if (args.ports or args.full) and (not args.no_nmap) and (not nmap_available()):
         _warn(err_console, "nmap not found — using the built-in Python connect scan.")
-    if args.default_creds or args.full:
+    if args.default_creds or args.full or args.full_auto:
         _warn(
             err_console,
             "default-credential checks enabled — only scan systems you are authorized to test.",
@@ -666,10 +754,11 @@ def _scan_command(argv: list[str]) -> int:
     except Exception as exc:
         _error(err_console, f"Failed to scan: {exc}")
         return 1
-    elapsed = time.perf_counter() - started
     if not reports:
         _warn(err_console, "No targets provided.")
         return 2
+    _run_brute_phase(reports, args, err_console)
+    elapsed = time.perf_counter() - started
     if args.export:
         _write_exports(
             reports, elapsed, args.export, args.output, err_console, include_graph=args.json_graph

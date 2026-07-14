@@ -7,7 +7,7 @@ from functools import lru_cache
 
 import aiohttp
 
-from stackscan.types import CredFinding, PortScan
+from stackscan.types import BruteTarget, CredFinding, PortScan
 from stackscan.utils import db_dir
 
 _CREDS_URL = "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Default-Credentials/default-passwords.csv"
@@ -40,6 +40,23 @@ _DEVICE_KEYWORDS = (
     "network camera",
     "surveillance",
     "uc-httpd",
+)
+_CAMERA_KEYWORDS = (
+    "camera",
+    "ipcam",
+    "netcam",
+    "webcam",
+    "dvr",
+    "nvr",
+    "cctv",
+    "hikvision",
+    "dahua",
+    "axis",
+    "foscam",
+    "vivotek",
+    "webcamxp",
+    "network camera",
+    "surveillance",
 )
 _BUILTIN_CREDS: tuple[tuple[str, str], ...] = (
     ("admin", "admin"),
@@ -123,45 +140,49 @@ def _looks_like_device(realm: str, server: str) -> bool:
     return any(keyword in blob for keyword in _DEVICE_KEYWORDS)
 
 
-async def check_default_creds(
+def _is_camera(realm: str, server: str) -> bool:
+    blob = f"{realm} {server}".lower()
+    return any(keyword in blob for keyword in _CAMERA_KEYWORDS)
+
+
+async def detect_devices(
     host: str,
     scan: PortScan | None,
     *,
     timeout: float = 6.0,
     insecure: bool = True,
     workers: int = 10,
-    cred_limit: int = 100,
-) -> list[CredFinding]:
+) -> tuple[list[CredFinding], list[BruteTarget]]:
     ports = _http_ports(scan)
     if not ports:
-        return []
-    creds = await asyncio.to_thread(load_default_creds)
-    if cred_limit > 0:
-        creds = creds[:cred_limit]
+        return ([], [])
     connector = aiohttp.TCPConnector(ssl=False, limit=max(workers, 1))
     client_timeout = aiohttp.ClientTimeout(total=timeout)
     semaphore = asyncio.Semaphore(max(workers, 1))
     findings: list[CredFinding] = []
+    candidates: list[BruteTarget] = []
     async with aiohttp.ClientSession(connector=connector, timeout=client_timeout) as session:
 
-        async def check(port: int, tls: bool) -> None:
+        async def probe(port: int, tls: bool) -> None:
             async with semaphore:
-                finding = await _check_endpoint(session, host, port, tls, creds)
-            if finding is not None:
-                findings.append(finding)
+                result = await _probe_endpoint(session, host, port, tls)
+            if isinstance(result, BruteTarget):
+                candidates.append(result)
+            elif result is not None:
+                findings.append(result)
 
-        await asyncio.gather(*(check(port, tls) for port, tls in ports))
-    findings.sort(key=lambda f: (f.kind != "default-creds", f.kind != "open-no-auth", f.target))
-    return findings
+        await asyncio.gather(*(probe(port, tls) for port, tls in ports))
+    findings.sort(key=lambda f: f.target)
+    candidates.sort(key=lambda c: (c.host, c.port))
+    return (findings, candidates)
 
 
-async def _check_endpoint(
+async def _probe_endpoint(
     session: aiohttp.ClientSession,
     host: str,
     port: int,
     tls: bool,
-    creds: tuple[tuple[str, str], ...],
-) -> CredFinding | None:
+) -> CredFinding | BruteTarget | None:
     scheme = "https" if tls else "http"
     url = f"{scheme}://{host}:{port}/"
     target = f"{host}:{port}"
@@ -184,23 +205,62 @@ async def _check_endpoint(
         return None
     if not device:
         return None
-    hit = await _try_defaults(session, url, creds)
-    if hit is not None:
-        username, password = hit
-        return CredFinding(
-            target=target,
-            service=f"{scheme} ({server or realm or 'device'})",
-            kind="default-creds",
-            detail="default credentials accepted via HTTP Basic auth",
-            username=username,
-            password=password,
-        )
-    return CredFinding(
-        target=target,
+    return BruteTarget(
+        host=host,
+        port=port,
+        tls=tls,
         service=f"{scheme} ({server or realm or 'device'})",
-        kind="auth-required",
-        detail="device auth required; no default credential matched",
+        is_camera=_is_camera(realm, server),
     )
+
+
+async def brute_devices(
+    targets: list[BruteTarget],
+    *,
+    timeout: float = 6.0,
+    insecure: bool = True,
+    workers: int = 10,
+    cred_limit: int = 100,
+) -> list[CredFinding]:
+    if not targets:
+        return []
+    creds = await asyncio.to_thread(load_default_creds)
+    if cred_limit > 0:
+        creds = creds[:cred_limit]
+    connector = aiohttp.TCPConnector(ssl=False, limit=max(workers, 1))
+    client_timeout = aiohttp.ClientTimeout(total=timeout)
+    semaphore = asyncio.Semaphore(max(workers, 1))
+    findings: list[CredFinding] = []
+    async with aiohttp.ClientSession(connector=connector, timeout=client_timeout) as session:
+
+        async def run(target: BruteTarget) -> None:
+            async with semaphore:
+                hit = await _try_defaults(session, target.url, creds)
+            if hit is not None:
+                username, password = hit
+                findings.append(
+                    CredFinding(
+                        target=target.target,
+                        service=target.service,
+                        kind="default-creds",
+                        detail="default credentials accepted via HTTP Basic auth",
+                        username=username,
+                        password=password,
+                    )
+                )
+            else:
+                findings.append(
+                    CredFinding(
+                        target=target.target,
+                        service=target.service,
+                        kind="auth-required",
+                        detail="device auth required; no default credential matched",
+                    )
+                )
+
+        await asyncio.gather(*(run(target) for target in targets))
+    findings.sort(key=lambda f: (f.kind != "default-creds", f.target))
+    return findings
 
 
 async def _try_defaults(

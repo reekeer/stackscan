@@ -315,6 +315,24 @@ class SocialLink:
         return {"platform": self.platform, "url": self.url, "handle": self.handle}
 
 
+@dataclass(frozen=True)
+class BruteTarget:
+    host: str
+    port: int
+    tls: bool = False
+    service: str = ""
+    is_camera: bool = False
+
+    @property
+    def target(self) -> str:
+        return f"{self.host}:{self.port}"
+
+    @property
+    def url(self) -> str:
+        scheme = "https" if self.tls else "http"
+        return f"{scheme}://{self.host}:{self.port}/"
+
+
 @dataclass
 class ScanReport:
     url: str
@@ -338,6 +356,7 @@ class ScanReport:
     site_findings: list[SiteFinding] = field(default_factory=list[SiteFinding])
     services: list[ServiceFinding] = field(default_factory=list[ServiceFinding])
     social: list[SocialLink] = field(default_factory=list[SocialLink])
+    brute_targets: list[BruteTarget] = field(default_factory=list[BruteTarget])
 
     def by_category(self) -> DetectedTech:
         grouped: dict[str, list[str]] = {}
