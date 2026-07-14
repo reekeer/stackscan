@@ -30,7 +30,7 @@ solicit and are opt-in. **Only scan systems you are authorized to test.**
 ## 📦 Installation
 
 ```bash
-pip install "stackscan @ git+https://github.com/reekeer/stackscan.git"
+pip install "stackscan"
 
 # optional extra
 pip install "stackscan[geo]"   # offline IP geolocation via geoip2 + a MaxMind .mmdb
