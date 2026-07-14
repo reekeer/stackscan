@@ -261,6 +261,9 @@ def _html_card(r: dict[str, Any]) -> str:
                 loc = t.get("location")
                 if loc and loc != host_of(r.get("url") or ""):
                     label += f" @{loc}"
+                conf = t.get("confidence")
+                if isinstance(conf, int):
+                    label += f" ({conf}%)"
                 by_cat.setdefault(c, []).append(label)
         rows = "".join(
             (_kv(cat, _chips(sorted(set(names)))) for cat, names in sorted(by_cat.items()))

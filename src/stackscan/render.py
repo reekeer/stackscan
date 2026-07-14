@@ -258,6 +258,7 @@ def _tech_section(report: ScanReport) -> RenderableType | None:
                 label = tech.name
                 if tech.location and tech.location != host_of(report.url):
                     label += f" @{tech.location}"
+                label += f" [{theme.MUTED}]({tech.confidence}%)[/]"
                 labels.append(label)
         grid.add_row(category, ", ".join(sorted(set(labels))))
     if software:

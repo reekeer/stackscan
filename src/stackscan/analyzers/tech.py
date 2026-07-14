@@ -43,6 +43,31 @@ class _Hit:
     evidence: list[str] = field(default_factory=list[str])
 
 
+_EVIDENCE_WEIGHTS: tuple[tuple[str, int], ...] = (
+    ("header:", 100),
+    ("cookie:", 95),
+    ("meta:", 90),
+    ("script_src", 85),
+    ("html", 80),
+    ("url", 75),
+    ("body", 70),
+)
+
+
+def _evidence_weight(evidence: str) -> int:
+    for prefix, weight in _EVIDENCE_WEIGHTS:
+        if evidence.startswith(prefix):
+            return weight
+    return 60
+
+
+def _confidence(evidence: list[str]) -> int:
+    if not evidence:
+        return 60
+    best = max(_evidence_weight(item) for item in evidence)
+    return min(100, best + 2 * (len(set(evidence)) - 1))
+
+
 _HEADER_TECH: tuple[tuple[str, str | None, str, str], ...] = (
     ("x-powered-by", "php", "PHP", "backend"),
     ("x-powered-by", "asp.net", "ASP.NET", "backend"),
@@ -146,6 +171,7 @@ class TechAnalyzer:
                 categories=(hit.category,) if hit.category else (),
                 evidence=tuple(hit.evidence),
                 location=location,
+                confidence=_confidence(hit.evidence),
             )
             for hit in by_name.values()
         ]

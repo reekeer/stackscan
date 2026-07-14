@@ -45,3 +45,13 @@ def test_evidence_recorded(tmp_path: Path) -> None:
     techs = analyzer.detect(result)
     nginx = next(tech for tech in techs if tech.name == "nginx")
     assert "header:server" in nginx.evidence
+
+
+def test_confidence_reflects_evidence_strength(tmp_path: Path) -> None:
+    analyzer = TechAnalyzer([_matcher(tmp_path)])
+    result = FetchResult(
+        url="https://example.com", status=200, headers={"server": "nginx"}, body="", cookies=()
+    )
+    nginx = next(tech for tech in analyzer.detect(result) if tech.name == "nginx")
+    assert nginx.confidence == 100
+    assert 1 <= nginx.confidence <= 100
