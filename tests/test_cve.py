@@ -155,3 +155,46 @@ def test_match_cves_marks_centos_banner_unconfirmed() -> None:
     assert cves
     assert all(c.unconfirmed for c in cves)
     assert all(c.confidence == 40 for c in cves)
+
+
+def test_distro_tag_detects_various_backport_distros() -> None:
+    assert _distro_tag("nginx/1.24.0 (Ubuntu)") == "Ubuntu"
+    assert _distro_tag("Apache/2.4.57 (Debian)") == "Debian"
+    assert _distro_tag("OpenSSH_9.6p1 Fedora-38") == "Fedora"
+    assert _distro_tag("OpenSSH_9.6p1 el9_3.2") == "el9"
+    assert _distro_tag("nginx/1.24.0 (Rocky Linux)") == "Rocky"
+    assert _distro_tag("nginx/1.24.0 (AlmaLinux 9)") == "AlmaLinux"
+    assert _distro_tag("nginx/1.24.0 (Amazon Linux 2)") == "Amazon"
+    assert _distro_tag("OpenSSH_9.6p1 ~bpo11+1") == "~bpo11+1"
+    assert _distro_tag("nginx/1.24.0 +deb11u1") == "+deb11u1"
+    assert _distro_tag("nginx/1.24.0 (Oracle Linux 8)") == "Oracle"
+    assert _distro_tag("nginx/1.24.0 (SLES 15)") == "SLES"
+    assert _distro_tag("nginx/1.24.0") == ""
+
+
+def test_software_from_ports_flags_distro_backports_for_any_service() -> None:
+    cases = [
+        ("nginx", "1.24.0 (Ubuntu)", "Ubuntu"),
+        ("apache", "2.4.57 (Debian)", "Debian"),
+        ("openssh", "9.6p1 Fedora-38", "Fedora"),
+        ("mysql", "8.0.36-0ubuntu0.22.04.1", "Ubuntu"),
+        ("nginx", "1.24.0 (Rocky Linux)", "Rocky"),
+        ("nginx", "1.24.0 (AlmaLinux 9)", "AlmaLinux"),
+        ("nginx", "1.24.0 (Amazon Linux 2)", "Amazon"),
+    ]
+    for product, version, expected in cases:
+        scan = PortScan(
+            scanner="nmap",
+            ports=(Port(port=80, service="http", product=product, version=version),),
+        )
+        software = software_from_ports(scan)
+        assert software, f"no software extracted for {product}"
+        assert any(
+            expected.lower() in (s.os or "").lower() for s in software
+        ), f"expected {expected} in os for {product} {version}, got {[s.os for s in software]}"
+        cves = match_cves(software)
+        if cves:
+            assert all(c.unconfirmed for c in cves), f"CVEs for {product} {version} should be unconfirmed"
+            assert all(
+                c.confidence == 40 for c in cves
+            ), f"CVE confidence for {product} {version} should be capped at 40"
