@@ -305,6 +305,16 @@ class ServiceFinding:
         }
 
 
+@dataclass(frozen=True)
+class SocialLink:
+    platform: str
+    url: str
+    handle: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"platform": self.platform, "url": self.url, "handle": self.handle}
+
+
 @dataclass
 class ScanReport:
     url: str
@@ -327,6 +337,7 @@ class ScanReport:
     protocols: list[str] = field(default_factory=list[str])
     site_findings: list[SiteFinding] = field(default_factory=list[SiteFinding])
     services: list[ServiceFinding] = field(default_factory=list[ServiceFinding])
+    social: list[SocialLink] = field(default_factory=list[SocialLink])
 
     def by_category(self) -> DetectedTech:
         grouped: dict[str, list[str]] = {}
@@ -366,4 +377,5 @@ class ScanReport:
             "protocols": list(self.protocols),
             "site_findings": [site.to_dict() for site in self.site_findings],
             "services": [service.to_dict() for service in self.services],
+            "social": [link.to_dict() for link in self.social],
         }

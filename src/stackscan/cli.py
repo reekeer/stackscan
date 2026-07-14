@@ -69,6 +69,12 @@ def _build_scan_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-probe", action="store_true", help="Skip passive exposure probes.")
     parser.add_argument("--no-cve", action="store_true", help="Skip CVE correlation.")
     parser.add_argument(
+        "--parse-social",
+        dest="parse_social",
+        action="store_true",
+        help="Extract social media and contact links from the page.",
+    )
+    parser.add_argument(
         "--cve-online",
         action="store_true",
         help="Also query NVD live for detected products (default is offline).",
@@ -323,6 +329,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         probe=not args.no_probe,
         cve=not args.no_cve,
         cve_online=args.cve_online and (not getattr(args, "no_cve_online", False)),
+        parse_social=args.parse_social,
         ports=(args.ports or full) and (not getattr(args, "no_ports", False)),
         subdomains=(args.subdomains or full) and (not getattr(args, "no_subdomains", False)),
         ip_info=not args.no_ip_info,

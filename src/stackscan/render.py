@@ -404,6 +404,20 @@ def _subdomains_section(report: ScanReport) -> RenderableType | None:
     return table
 
 
+def _social_section(report: ScanReport) -> RenderableType | None:
+    if not report.social:
+        return None
+    grid = Table.grid(padding=(0, 1))
+    grid.add_column(style="bold cyan", no_wrap=True, justify="right")
+    grid.add_column(overflow="fold")
+    by_platform: dict[str, list[str]] = {}
+    for link in report.social:
+        by_platform.setdefault(link.platform, []).append(link.handle or link.url)
+    for platform in sorted(by_platform):
+        grid.add_row(platform, ", ".join(dict.fromkeys(by_platform[platform])))
+    return grid
+
+
 def _security_section(report: ScanReport) -> RenderableType | None:
     sec = report.security
     if not sec.present and (not sec.missing):
@@ -460,6 +474,7 @@ _SECTIONS: tuple[tuple[str, _SectionBuilder], ...] = (
     ("Subdomains", _subdomains_section),
     ("Security headers", _security_section),
     ("Exposure", _exposure_section),
+    ("Social & contacts", _social_section),
 )
 
 

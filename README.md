@@ -135,6 +135,7 @@ Below are performance benchmarks conducted on two production targets using diffe
 | `--default-creds` | off | Bounded default-credential / open-device check. |
 | `--cred-limit` | `50` | Max default-credential pairs per device (`0` = full SecLists list). |
 | `--cve-online` | off | Also query NVD live for detected products. |
+| `--parse-social` | off | Extract social media and contact links from the page. |
 | `--workers` | `350` | Parallel workers for ports/subdomains/creds. |
 | `--concurrency` | `10` | Concurrent targets. |
 | `--sigdb` / `--no-builtin` / `--no-sources` | – | Signature database selection. |

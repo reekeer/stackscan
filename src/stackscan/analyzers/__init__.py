@@ -10,6 +10,7 @@ from stackscan.analyzers.exposure import ExposureProbe, analyze_exposure
 from stackscan.analyzers.infra import analyze_infra
 from stackscan.analyzers.security import analyze_security_headers
 from stackscan.analyzers.services import classify_services, port_category
+from stackscan.analyzers.social import parse_social
 from stackscan.analyzers.tech import TechAnalyzer
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "check_default_creds",
     "classify_services",
     "port_category",
+    "parse_social",
     "extract_software",
     "match_cves",
     "match_cves_online",

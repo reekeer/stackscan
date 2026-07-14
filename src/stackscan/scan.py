@@ -18,6 +18,7 @@ from stackscan.analyzers import (
     match_cves,
     match_cves_online,
     merge_cve_matches,
+    parse_social,
     software_from_ports,
 )
 from stackscan.net import (
@@ -113,6 +114,7 @@ class ScanOptions:
     probe: bool = True
     cve: bool = True
     cve_online: bool = False
+    parse_social: bool = False
     ports: bool = False
     subdomains: bool = False
     ip_info: bool = True
@@ -437,6 +439,8 @@ async def scan_target(
             report.infra = analyze_infra(fetched.headers, tuple(fetched.cookies), host)
             report.security = analyze_security_headers(fetched.headers)
             report.protocols = _http_protocols(fetched, report.tls)
+            if options.parse_social:
+                report.social = parse_social(fetched.body, fetched.url)
 
         if (options.subdomains and host) or (options.probe and fetched is not None):
             bits: list[str] = []

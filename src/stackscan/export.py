@@ -327,6 +327,16 @@ def _html_card(r: dict[str, Any]) -> str:
     exp_flags = [k for k in ("git_exposed", "robots_txt", "sitemap", "security_txt") if exp.get(k)]
     if exp_flags:
         body_parts.append(_section("Exposure", _chips(exp_flags)))
+    social = r.get("social") or []
+    if social:
+        rows = "".join(
+            _kv(
+                _e(s.get("platform")),
+                f'<a href="{_e(s.get("url"))}">{_e(s.get("handle") or s.get("url"))}</a>',
+            )
+            for s in social
+        )
+        body_parts.append(_section("Social & contacts", rows))
     danger = any((c.get("severity") or "").upper() in ("CRITICAL", "HIGH") for c in cves) or any(
         c.get("kind") in ("default-creds", "open-no-auth") for c in creds
     )
