@@ -4,7 +4,12 @@ import asyncio
 import shutil
 from typing import Any, cast
 
-from stackscan.net.fingerprint import fingerprint_banner, fingerprint_http
+from stackscan.net.fingerprint import (
+    fingerprint_banner,
+    fingerprint_http,
+    fingerprint_mysql,
+    sanitize_banner,
+)
 from stackscan.types import Port, PortScan
 
 COMMON_PORTS: dict[int, tuple[str, str]] = {
@@ -34,7 +39,8 @@ COMMON_PORTS: dict[int, tuple[str, str]] = {
     2083: ("cpanel-ssl", "http"),
     2222: ("ssh-alt", "banner"),
     3000: ("http-dev", "http"),
-    3306: ("mysql", "banner"),
+    3306: ("mysql", "mysql"),
+    3307: ("mysql", "mysql"),
     3389: ("ms-wbt-server", "none"),
     5432: ("postgresql", "none"),
     5900: ("vnc", "banner"),
@@ -135,6 +141,12 @@ async def _connect_scan(
     return PortScan(scanner="connect", ports=open_ports, note=note)
 
 
+def _os_from_banner(banner: str) -> str:
+    from stackscan.net.fingerprint import extract_distro
+
+    return extract_distro(banner) or ""
+
+
 async def _probe_port(host: str, port: int, timeout: float) -> Port | None:
     service, probe = COMMON_PORTS.get(port, ("unknown", "banner"))
     try:
@@ -145,16 +157,27 @@ async def _probe_port(host: str, port: int, timeout: float) -> Port | None:
         return None
     product: str | None = None
     version: str | None = None
+    os: str = ""
+    state: str = "open"
     try:
         if probe == "banner":
-            banner = await _read(reader, timeout)
-            if banner:
-                svc, product, version = fingerprint_banner(banner)
+            raw = await _read(reader, timeout)
+            if raw:
+                svc, product, version = fingerprint_banner(raw)
                 service = svc or service
                 if not product:
-                    version = banner[:80]
+                    version = sanitize_banner(raw)[:80]
+                os = _os_from_banner(raw)
+        elif probe == "mysql":
+            data = await _read_bytes(reader, timeout)
+            if data:
+                product, version, distro, auth_refused = fingerprint_mysql(data)
+                service = (product or "mysql").lower()
+                os = distro or ""
+                if auth_refused:
+                    state = "auth-refused"
         elif probe == "http":
-            product, version = await _http_probe(host, port, reader, writer, timeout)
+            product, version, os = await _http_probe(host, port, reader, writer, timeout)
         elif probe == "rtsp":
             product, version = await _rtsp_probe(host, port, reader, writer, timeout)
     finally:
@@ -166,11 +189,12 @@ async def _probe_port(host: str, port: int, timeout: float) -> Port | None:
     return Port(
         port=port,
         protocol="tcp",
-        state="open",
+        state=state,
         service=service,
         product=product,
         version=version,
         host=host,
+        os=os,
     )
 
 
@@ -181,12 +205,20 @@ async def _read(reader: asyncio.StreamReader, timeout: float) -> str | None:
         return None
     if not data:
         return None
-    return data.decode("utf-8", "replace").strip() or None
+    return sanitize_banner(data.decode("utf-8", "replace")).strip() or None
+
+
+async def _read_bytes(reader: asyncio.StreamReader, timeout: float) -> bytes | None:
+    try:
+        data = await asyncio.wait_for(reader.read(_BANNER_BYTES), timeout=min(timeout, 2.5))
+    except (TimeoutError, OSError):
+        return None
+    return data if data else None
 
 
 async def _http_probe(
     host: str, port: int, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, timeout: float
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, str]:
     request = (
         f"GET / HTTP/1.0\r\nHost: {host}\r\nUser-Agent: stackscan\r\nConnection: close\r\n\r\n"
     )
@@ -194,11 +226,13 @@ async def _http_probe(
         writer.write(request.encode("ascii", "ignore"))
         await asyncio.wait_for(writer.drain(), timeout=min(timeout, 2.5))
     except (TimeoutError, OSError):
-        return (None, None)
+        return (None, None, "")
     raw = await _read(reader, timeout)
     if not raw:
-        return (None, None)
-    return fingerprint_http(raw)
+        return (None, None, "")
+    product, version = fingerprint_http(raw)
+    os = _os_from_banner(raw)
+    return (product, version, os)
 
 
 async def _rtsp_probe(

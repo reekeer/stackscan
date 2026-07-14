@@ -296,7 +296,7 @@ def _services_section(report: ScanReport) -> RenderableType | None:
 
     ordered_ports = sorted(ports, key=lambda p: (p.port, _ip_sort_key(p.host or "")))
     for port in ordered_ports:
-        _category, severity = port_category(port.port, port.service)
+        _category, severity = port_category(port.port, port.service, port.state)
         product = " ".join(filter(None, (port.product, port.version)))
         table.add_row(
             f"{port.port}/{port.protocol}",

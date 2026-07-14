@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from stackscan.net.fingerprint import fingerprint_banner, fingerprint_http
+from stackscan.net.fingerprint import (
+    fingerprint_banner,
+    fingerprint_http,
+    fingerprint_mysql,
+    sanitize_banner,
+)
 from stackscan.net.ports import COMMON_PORTS, default_ports
 
 
@@ -13,7 +18,7 @@ def test_default_ports_are_sorted_and_include_common_services() -> None:
 
 def test_common_ports_have_probe_kind() -> None:
     for _service, probe in COMMON_PORTS.values():
-        assert probe in {"banner", "http", "rtsp", "none"}
+        assert probe in {"banner", "http", "rtsp", "mysql", "none"}
 
 
 def test_fingerprint_ssh_banner() -> None:
@@ -39,3 +44,40 @@ def test_fingerprint_http_server_header() -> None:
 
 def test_fingerprint_unknown_banner() -> None:
     assert fingerprint_banner("random noise") == (None, None, None)
+
+
+def test_sanitize_banner_strips_control_chars() -> None:
+    raw = "\x00\x01k\n5.5.5-10.11.14-MariaDB\x07\x00"
+    assert sanitize_banner(raw) == "k5.5.5-10.11.14-MariaDB"
+
+
+def _mysql_handshake(version: str) -> bytes:
+    payload = bytearray([0x0A])
+    payload.extend(version.encode("utf-8"))
+    payload.append(0x00)
+    payload.extend(b"\x00" * 20)
+    length = len(payload)
+    return bytes([length & 0xFF, (length >> 8) & 0xFF, (length >> 16) & 0xFF, 0x00]) + bytes(payload)
+
+
+def test_fingerprint_mysql_mariadb_with_ubuntu_suffix() -> None:
+    data = _mysql_handshake("5.5.5-10.11.14-MariaDB-0ubuntu0.24.04.1")
+    product, version, os, refused = fingerprint_mysql(data)
+    assert product == "MariaDB"
+    assert version == "10.11.14"
+    assert "Ubuntu" in os
+    assert refused is False
+
+
+def test_fingerprint_mysql_plain_mysql() -> None:
+    data = _mysql_handshake("8.0.35")
+    product, version, os, refused = fingerprint_mysql(data)
+    assert product == "MySQL"
+    assert version == "8.0.35"
+    assert refused is False
+
+
+def test_fingerprint_mysql_err_packet_is_auth_refused() -> None:
+    data = bytes([0x15, 0x00, 0x00, 0x00, 0xFF]) + b"\x00" * 21
+    product, version, os, refused = fingerprint_mysql(data)
+    assert refused is True

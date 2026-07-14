@@ -180,6 +180,7 @@ class Port:
     product: str | None = None
     version: str | None = None
     host: str | None = None
+    os: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -190,6 +191,7 @@ class Port:
             "product": self.product,
             "version": self.version,
             "host": self.host,
+            "os": self.os,
         }
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from stackscan.types import ScanReport, ServiceFinding, Technology
+from stackscan.types import Port, ScanReport, ServiceFinding, Technology
 
 _DB_PORTS: dict[int, str] = {
     3306: "MySQL",
@@ -129,7 +129,7 @@ _SECURITY_TECHS: dict[str, str] = {
 }
 
 _SEVERITY: dict[str, str] = {
-    "database": "CRITICAL",
+    "database": "MEDIUM",
     "admin-panel": "HIGH",
     "remote-access": "HIGH",
     "camera": "HIGH",
@@ -176,33 +176,46 @@ def _service_from_tech(tech: Technology) -> ServiceFinding | None:
     return None
 
 
-def _service_from_port(port: int) -> ServiceFinding | None:
-    if port in _DB_PORTS:
+def _database_severity(state: str) -> str:
+    if state == "open-no-auth":
+        return "CRITICAL"
+    if state == "auth-refused":
+        return "LOW"
+    return _SEVERITY["database"]
+
+
+def _service_from_port(port: Port) -> ServiceFinding | None:
+    number = port.port
+    if number in _DB_PORTS:
+        severity = _database_severity(port.state)
+        evidence = f"port {number}/tcp"
+        if port.state == "auth-refused":
+            evidence += "; connection refused by host ACL"
         return ServiceFinding(
-            name=_DB_PORTS[port],
+            name=_DB_PORTS[number],
             kind="database",
-            evidence=f"port {port}/tcp",
-            severity=_SEVERITY["database"],
+            evidence=evidence,
+            severity=severity,
         )
-    if port in _REMOTE_PORTS:
+    if number in _REMOTE_PORTS:
         return ServiceFinding(
-            name=_REMOTE_PORTS[port],
+            name=_REMOTE_PORTS[number],
             kind="remote-access",
-            evidence=f"port {port}/tcp",
+            evidence=f"port {number}/tcp",
             severity=_SEVERITY["remote-access"],
         )
-    if port in _CAMERA_PORTS:
+    if number in _CAMERA_PORTS:
         return ServiceFinding(
-            name=_CAMERA_PORTS[port],
+            name=_CAMERA_PORTS[number],
             kind="camera",
-            evidence=f"port {port}/tcp",
+            evidence=f"port {number}/tcp",
             severity=_SEVERITY["camera"],
         )
-    if port in _MESSAGE_PORTS:
+    if number in _MESSAGE_PORTS:
         return ServiceFinding(
-            name=_MESSAGE_PORTS[port],
+            name=_MESSAGE_PORTS[number],
             kind="messaging",
-            evidence=f"port {port}/tcp",
+            evidence=f"port {number}/tcp",
             severity=_SEVERITY["messaging"],
         )
     return None
@@ -214,10 +227,10 @@ _WEB_PORTS: frozenset[int] = frozenset(
 _WINDOWS_PORTS: frozenset[int] = frozenset({111, 135, 139, 445, 5985})
 
 
-def port_category(port: int, service: str | None) -> tuple[str, str]:
+def port_category(port: int, service: str | None, state: str = "open") -> tuple[str, str]:
 
     if port in _DB_PORTS:
-        return ("database", _SEVERITY["database"])
+        return ("database", _database_severity(state))
     if port in _REMOTE_PORTS or port == 2222:
         return ("remote-access", _SEVERITY["remote-access"])
     if port in _CAMERA_PORTS:
@@ -242,7 +255,7 @@ def port_category(port: int, service: str | None) -> tuple[str, str]:
     if any(k in svc for k in ("smtp", "imap", "pop", "mqtt")):
         return ("mail", "MEDIUM")
     if any(k in svc for k in ("mysql", "postgres", "redis", "mongo", "sql")):
-        return ("database", "CRITICAL")
+        return ("database", _database_severity(state))
     if "ftp" in svc:
         return ("file-transfer", "MEDIUM")
     return ("other", "INFO")
@@ -265,7 +278,7 @@ def classify_services(report: ScanReport) -> list[ServiceFinding]:
     scan = report.ports
     if scan is not None:
         for port in scan.ports:
-            finding = _service_from_port(port.port)
+            finding = _service_from_port(port)
             if finding is None:
                 continue
             key = (finding.name.lower(), finding.kind)

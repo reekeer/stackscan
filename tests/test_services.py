@@ -2,7 +2,7 @@ from stackscan.analyzers.services import classify_services
 from stackscan.types import Port, PortScan, ScanReport, Technology
 
 
-def test_database_port_emits_critical_service() -> None:
+def test_database_port_emits_medium_service_by_default() -> None:
     report = ScanReport(url="https://a.test")
     report.ports = PortScan(
         scanner="connect",
@@ -11,8 +11,19 @@ def test_database_port_emits_critical_service() -> None:
     services = classify_services(report)
     kinds = {s.name: s for s in services}
     assert "MySQL" in kinds
-    assert kinds["MySQL"].severity == "CRITICAL"
+    assert kinds["MySQL"].severity == "MEDIUM"
     assert kinds["MySQL"].kind == "database"
+
+
+def test_database_auth_refused_emits_low_service() -> None:
+    report = ScanReport(url="https://a.test")
+    report.ports = PortScan(
+        scanner="connect",
+        ports=(Port(port=3306, service="mysql", state="auth-refused"),),
+    )
+    services = classify_services(report)
+    mysql = next(s for s in services if s.name == "MySQL")
+    assert mysql.severity == "LOW"
 
 
 def test_admin_tech_emits_high_service() -> None:
