@@ -413,6 +413,26 @@ def _subdomains_section(report: ScanReport) -> RenderableType | None:
     return table
 
 
+def _os_section(report: ScanReport) -> RenderableType | None:
+    if not report.os_findings:
+        return None
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Host", style="bold cyan", overflow="fold")
+    table.add_column("OS", overflow="fold")
+    table.add_column("Service", overflow="fold")
+    table.add_column("Category", overflow="fold")
+    table.add_column("Source", overflow="fold")
+    for finding in report.os_findings:
+        table.add_row(
+            finding.host,
+            finding.os,
+            finding.service,
+            finding.category,
+            f"{finding.source}  ({int(finding.confidence * 100)}%)",
+        )
+    return table
+
+
 def _social_section(report: ScanReport) -> RenderableType | None:
     if not report.social:
         return None
@@ -479,6 +499,7 @@ _SECTIONS: tuple[tuple[str, _SectionBuilder], ...] = (
     ("Technologies & Software", _tech_section),
     ("Vulnerabilities (CVE)", _cve_section),
     ("Services & open ports", _services_section),
+    ("Hosts & OS", _os_section),
     ("Default creds / open devices", _creds_section),
     ("Subdomains", _subdomains_section),
     ("Security headers", _security_section),

@@ -14,6 +14,7 @@ from stackscan.analyzers import (
     analyze_security_headers,
     classify_services,
     detect_devices,
+    detect_os,
     extract_software,
     match_cves,
     match_cves_online,
@@ -534,6 +535,7 @@ async def scan_target(
             report.cves = merge_cve_matches(report.cves, online_cves)
 
         report.services = classify_services(report)
+        report.os_findings = detect_os(report)
     report.elapsed = perf_counter() - started
     return report
 

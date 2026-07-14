@@ -316,6 +316,26 @@ class ServiceFinding:
 
 
 @dataclass(frozen=True)
+class OsFinding:
+    host: str
+    os: str
+    category: str
+    service: str
+    source: str
+    confidence: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "host": self.host,
+            "os": self.os,
+            "category": self.category,
+            "service": self.service,
+            "source": self.source,
+            "confidence": self.confidence,
+        }
+
+
+@dataclass(frozen=True)
 class SocialLink:
     platform: str
     url: str
@@ -365,6 +385,7 @@ class ScanReport:
     protocols: list[str] = field(default_factory=list[str])
     site_findings: list[SiteFinding] = field(default_factory=list[SiteFinding])
     services: list[ServiceFinding] = field(default_factory=list[ServiceFinding])
+    os_findings: list[OsFinding] = field(default_factory=list[OsFinding])
     social: list[SocialLink] = field(default_factory=list[SocialLink])
     brute_targets: list[BruteTarget] = field(default_factory=list[BruteTarget])
 
@@ -406,5 +427,6 @@ class ScanReport:
             "protocols": list(self.protocols),
             "site_findings": [site.to_dict() for site in self.site_findings],
             "services": [service.to_dict() for service in self.services],
+            "os_findings": [finding.to_dict() for finding in self.os_findings],
             "social": [link.to_dict() for link in self.social],
         }

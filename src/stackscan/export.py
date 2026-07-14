@@ -283,6 +283,20 @@ def _html_card(r: dict[str, Any]) -> str:
                 f"<table><thead><tr><th>Service</th><th>Kind</th><th>Severity</th><th>Evidence</th></tr></thead><tbody>{rows}</tbody></table>",
             )
         )
+    os_findings = r.get("os_findings") or []
+    if os_findings:
+        rows = "".join(
+            f"<tr><td>{_e(o.get('host'))}</td><td>{_e(o.get('os'))}</td>"
+            f"<td>{_e(o.get('service'))}</td><td>{_e(o.get('category'))}</td>"
+            f"<td>{_e(o.get('source'))}  ({int((o.get('confidence') or 0) * 100)}%)</td></tr>"
+            for o in os_findings
+        )
+        body_parts.append(
+            _section(
+                "Hosts & OS",
+                f"<table><thead><tr><th>Host</th><th>OS</th><th>Service</th><th>Category</th><th>Source</th></tr></thead><tbody>{rows}</tbody></table>",
+            )
+        )
     software = r.get("software") or []
     if software:
         names = [f"{s.get('name')} {s.get('version')}".strip() for s in software]
