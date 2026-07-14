@@ -743,8 +743,12 @@ def _sigdb_command(argv: list[str]) -> int:
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = list(argv) if argv is not None else sys.argv[1:]
-    if args and args[0] == "sigdb":
-        return _sigdb_command(args[1:])
-    if args and args[0] == "scan":
-        args = args[1:]
-    return _scan_command(args)
+    try:
+        if args and args[0] == "sigdb":
+            return _sigdb_command(args[1:])
+        if args and args[0] == "scan":
+            args = args[1:]
+        return _scan_command(args)
+    except KeyboardInterrupt:
+        Console(stderr=True).print(f"[{theme.WARN}][!][/] interrupted", highlight=False)
+        return 130
