@@ -36,7 +36,7 @@ def _severity_text(cve: CveMatch) -> Text:
     label = cve.severity.upper()
     if cve.cvss is not None:
         label = f"{label} {cve.cvss:.1f}"
-    if cve.severity.upper() == "CRITICAL":
+    if cve.severity.upper() == "CRITICAL" and not cve.unconfirmed:
         return Text(f" {label} ", style=f"bold white on {theme.DANGER}")
     return Text(f" {label} ", style=f"bold {color}")
 
@@ -334,7 +334,11 @@ def _cve_section(report: ScanReport) -> RenderableType | None:
     table.add_column("Summary", overflow="fold")
     for cve in report.cves:
         affects = f"{cve.product} {cve.version}" if cve.version else cve.product
+        if cve.unconfirmed:
+            affects += "  ·  unconfirmed · version-only"
         summary = cve.summary if len(cve.summary) <= 80 else cve.summary[:77] + "..."
+        if cve.caveat:
+            summary = f"{cve.caveat} — {summary}"
         table.add_row(
             _severity_text(cve),
             cve.id,
@@ -526,7 +530,7 @@ def _unreachable_line(report: ScanReport) -> Text:
 
 def _worst_severity(report: ScanReport) -> str | None:
     order = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
-    present = {cve.severity.upper() for cve in report.cves}
+    present = {cve.severity.upper() for cve in report.cves if not cve.unconfirmed}
     for level in order:
         if level in present:
             return level

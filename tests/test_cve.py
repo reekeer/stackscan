@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from stackscan.analyzers.cve import (
     _cmp,
+    _distro_tag,
     _in_range,
     extract_software,
     match_cves,
@@ -78,3 +79,34 @@ def test_software_from_ports_ssh_banner() -> None:
     )
     software = software_from_ports(scan)
     assert any(s.name == "openssh" and s.version == "8.7" for s in software)
+
+
+def test_distro_tag_detects_backport_suffixes() -> None:
+    assert _distro_tag("nginx/1.24.0 (Ubuntu)") == "Ubuntu"
+    assert _distro_tag("OpenSSH_9.6p1 Ubuntu-3ubuntu13.18") == "Ubuntu"
+    assert _distro_tag("10.11.14-MariaDB-0ubuntu0.24.04.1") == "0ubuntu0.24.04.1"
+    assert _distro_tag("nginx/1.20.0") == ""
+
+
+def test_extract_software_sets_os_from_server_header() -> None:
+    headers = {"server": "nginx/1.24.0 (Ubuntu)"}
+    software = extract_software(headers, "")
+    nginx = next(s for s in software if s.name == "nginx")
+    assert "Ubuntu" in nginx.os
+
+
+def test_match_cves_marks_ubuntu_banner_unconfirmed() -> None:
+    software = extract_software({"server": "nginx/1.24.0 (Ubuntu)"}, "")
+    cves = match_cves(software)
+    assert cves
+    assert all(c.unconfirmed for c in cves)
+    assert all(c.confidence == 40 for c in cves)
+    assert not any(c.severity == "CRITICAL" and not c.unconfirmed for c in cves)
+
+
+def test_match_cves_clean_upstream_keeps_normal_confidence() -> None:
+    software = extract_software({"server": "nginx/1.18.0"}, "")
+    cves = match_cves(software)
+    assert cves
+    assert not any(c.unconfirmed for c in cves)
+    assert all(c.confidence in (85, 91, 98) for c in cves)

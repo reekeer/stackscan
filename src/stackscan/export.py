@@ -350,8 +350,14 @@ def _html_cve_row(c: dict[str, Any]) -> str:
     sev_label = f"{sev} {cvss:.1f}" if isinstance(cvss, (int, float)) else sev
     conf = int(c.get("confidence") or 0)
     affects = f"{c.get('product')} {c.get('version') or ''}".strip()
+    if c.get("unconfirmed"):
+        affects += " · unconfirmed · version-only"
     sources = ", ".join(c.get("sources") or ())
-    return f"""<tr><td><span class="sev sev-{sev.lower()}">{_e(sev_label)}</span></td><td>{_e(c.get("id"))}</td><td>{_e(affects)}</td><td>{_e(sources) or "-"}</td><td><div class="bar"><span style="width:{conf}%"></span></div>{conf}%</td><td class="sum">{_e(c.get("summary"))}</td></tr>"""
+    summary = c.get("summary") or ""
+    caveat = c.get("caveat")
+    if caveat:
+        summary = f"{caveat} — {summary}"
+    return f"""<tr><td><span class="sev sev-{sev.lower()}">{_e(sev_label)}</span></td><td>{_e(c.get("id"))}</td><td>{_e(affects)}</td><td>{_e(sources) or "-"}</td><td><div class="bar"><span style="width:{conf}%"></span></div>{conf}%</td><td class="sum">{_e(summary)}</td></tr>"""
 
 
 def _html_cred_row(c: dict[str, Any]) -> str:

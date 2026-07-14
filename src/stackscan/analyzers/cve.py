@@ -12,6 +12,16 @@ from typing import Any, cast
 from stackscan.types import CveMatch, Headers, PortScan, Software
 
 CveEntry = dict[str, Any]
+_BACKPORT_DISTRO_RE = re.compile(
+    r"(0?ubuntu0?[._]\d[\d.]+)"
+    r"|(\+deb\d+u?\d*)"
+    r"|(-\d+ubuntu\d+(?![\d._]))"
+    r"|\b(ubuntu|debian|centos|rhel|fedora|amzn|raspbian|alpine|rocky|almalinux)\b"
+    r"|(el\d+)"
+    r"|(\.fc\d+)"
+    r"|(~bpo\d+\+[\w]+)",
+    re.I,
+)
 CveDb = dict[str, list[CveEntry]]
 _NAME_MAP: dict[str, str] = {
     "nginx": "nginx",
@@ -109,6 +119,11 @@ def load_cve_db() -> CveDb:
     return cast("CveDb", products)
 
 
+def _distro_tag(text: str) -> str:
+    match = _BACKPORT_DISTRO_RE.search(text)
+    return match.group(0) if match else ""
+
+
 def _parse_version(value: str) -> tuple[tuple[int, str], ...]:
     parts: list[tuple[int, str]] = []
     for chunk in re.split("[.\\-_]", value.strip()):
@@ -140,10 +155,12 @@ def _in_range(version: str, rng: dict[str, str]) -> bool:
     return bool(rng)
 
 
-def _tokens(value: str, source: str, location: str) -> list[Software]:
+def _tokens(value: str, source: str, location: str, os: str = "") -> list[Software]:
     found: list[Software] = []
     for name, version in _TOKEN_RE.findall(value):
-        found.append(Software(name=name.lower(), version=version, source=source, location=location))
+        found.append(
+            Software(name=name.lower(), version=version, source=source, location=location, os=os)
+        )
     return found
 
 
@@ -159,7 +176,8 @@ def extract_software(headers: Headers, body: str, location: str = "") -> list[So
 
     server = headers.get("server")
     if server:
-        for item in _tokens(server, "header:server", location):
+        server_os = _distro_tag(server)
+        for item in _tokens(server, "header:server", location, os=server_os):
             add(item)
     powered = headers.get("x-powered-by")
     if powered:
@@ -197,7 +215,11 @@ def software_from_ports(scan: PortScan | None) -> list[Software]:
         if ssh:
             out.append(
                 Software(
-                    name="openssh", version=ssh.group(1), source="port-banner", location=location
+                    name="openssh",
+                    version=ssh.group(1),
+                    source="port-banner",
+                    location=location,
+                    os=port.os,
                 )
             )
             continue
@@ -208,6 +230,7 @@ def software_from_ports(scan: PortScan | None) -> list[Software]:
                     version=port.version,
                     source="port-banner",
                     location=location,
+                    os=port.os,
                 )
             )
     return out
@@ -242,6 +265,8 @@ class _CveAgg:
     url: str | None
     locations: set[str] = field(default_factory=set[str])
     sources: set[str] = field(default_factory=set[str])
+    unconfirmed: bool = False
+    caveat: str = ""
 
 
 def _match_entries(
@@ -253,13 +278,15 @@ def _match_entries(
     version = item.version
     if not version:
         return
+    backported = bool(item.os)
+    caveat = "distro backport likely — patchlevel not in banner" if backported else ""
     for entry in entries:
         ranges = cast("list[dict[str, str]]", entry.get("ranges") or [])
         hit_rng = next((r for r in ranges if _in_range(version, r)), None)
         if hit_rng is None:
             continue
         cve_id = str(entry["id"])
-        confidence = _confidence(version, hit_rng, item.source)
+        confidence = 40 if backported else _confidence(version, hit_rng, item.source)
         record = agg.get(cve_id)
         if record is None:
             record = _CveAgg(
@@ -271,13 +298,19 @@ def _match_entries(
                 confidence=confidence,
                 summary=str(entry.get("summary", "")),
                 url=entry.get("url"),
+                unconfirmed=backported,
+                caveat=caveat,
             )
             agg[cve_id] = record
         if item.location:
             record.locations.add(item.location)
         if item.source:
             record.sources.add(item.source)
-        if confidence > record.confidence:
+        if backported:
+            record.unconfirmed = True
+            record.caveat = caveat
+            record.confidence = min(record.confidence, 40)
+        elif confidence > record.confidence:
             record.confidence = confidence
             record.version = version
 
@@ -295,6 +328,8 @@ def _agg_to_matches(agg: dict[str, _CveAgg]) -> list[CveMatch]:
             url=r.url,
             locations=tuple(sorted(r.locations)),
             sources=tuple(sorted(r.sources)),
+            unconfirmed=r.unconfirmed,
+            caveat=r.caveat,
         )
         for r in agg.values()
     ]

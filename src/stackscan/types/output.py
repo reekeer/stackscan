@@ -133,6 +133,7 @@ class Software:
     version: str | None = None
     source: str = ""
     location: str = ""
+    os: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -140,6 +141,7 @@ class Software:
             "version": self.version,
             "source": self.source,
             "location": self.location,
+            "os": self.os,
         }
 
 
@@ -155,6 +157,8 @@ class CveMatch:
     url: str | None = None
     locations: tuple[str, ...] = ()
     sources: tuple[str, ...] = ()
+    unconfirmed: bool = False
+    caveat: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -168,6 +172,8 @@ class CveMatch:
             "url": self.url,
             "locations": list(self.locations),
             "sources": list(self.sources),
+            "unconfirmed": self.unconfirmed,
+            "caveat": self.caveat,
         }
 
 

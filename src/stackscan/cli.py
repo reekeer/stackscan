@@ -598,8 +598,12 @@ def _scan_summary(reports: list[ScanReport], elapsed: float) -> str:
     targets = len(reports)
     cves = sum(len(report.cves) for report in reports)
     critical = sum(
-        1 for report in reports for cve in report.cves if cve.severity.upper() == "CRITICAL"
+        1
+        for report in reports
+        for cve in report.cves
+        if cve.severity.upper() == "CRITICAL" and not cve.unconfirmed
     )
+    unconfirmed = sum(1 for report in reports for cve in report.cves if cve.unconfirmed)
     exposed = sum(
         1
         for report in reports
@@ -612,6 +616,8 @@ def _scan_summary(reports: list[ScanReport], elapsed: float) -> str:
     parts = [f"[bold]{targets}[/bold] target(s)", f"[bold]{cves}[/bold] CVE(s)"]
     if critical:
         parts.append(f"[bold {theme.DANGER}]{critical} critical[/]")
+    if unconfirmed:
+        parts.append(f"[bold]{unconfirmed}[/bold] unconfirmed")
     if ports:
         parts.append(f"[bold]{ports}[/bold] open port(s)")
     if subdomains:
