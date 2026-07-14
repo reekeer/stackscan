@@ -9,7 +9,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from stackscan import theme
+from stackscan import __version__, theme
 from stackscan.analyzers import port_category
 from stackscan.types import CveMatch, IpInfo, ScanReport
 from stackscan.utils import host_of
@@ -24,7 +24,7 @@ def render_banner(console: Console) -> None:
     console.print(Text(BANNER, style=f"bold {theme.ACCENT}"), highlight=False)
     console.print(
         Text(
-            "Created by reekeer · https://github.com/reekeer/stackscan",
+            f"Created by reekeer · https://github.com/reekeer/stackscan · {__version__}",
             style=f"dim {theme.ACCENT}",
         ),
         highlight=False,
