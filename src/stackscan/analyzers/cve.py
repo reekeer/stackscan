@@ -99,7 +99,7 @@ _JQUERY_RE = re.compile("jquery[-/]?v?(\\d+\\.\\d+(?:\\.\\d+)?)", re.IGNORECASE)
 _GENERATOR_RE = re.compile(
     "<meta[^>]+name=[\\\"']generator[\\\"'][^>]+content=[\\\"']([^\\\"']+)[\\\"']", re.IGNORECASE
 )
-_SSH_RE = re.compile("openssh[_/-]?(\\d+\\.\\d+(?:p\\d+)?)", re.IGNORECASE)
+_SSH_RE = re.compile(r"openssh[\s_/:-](\d+\.\d+(?:p\d+)?)", re.IGNORECASE)
 
 
 @lru_cache(maxsize=1)
@@ -211,6 +211,7 @@ def software_from_ports(scan: PortScan | None) -> list[Software]:
         if not blob:
             continue
         location = f"{port.host}:{port.port}" if port.host else f":{port.port}"
+        port_os = port.os or _distro_tag(blob)
         ssh = _SSH_RE.search(blob)
         if ssh:
             out.append(
@@ -219,7 +220,7 @@ def software_from_ports(scan: PortScan | None) -> list[Software]:
                     version=ssh.group(1),
                     source="port-banner",
                     location=location,
-                    os=port.os,
+                    os=port_os,
                 )
             )
             continue
@@ -230,7 +231,7 @@ def software_from_ports(scan: PortScan | None) -> list[Software]:
                     version=port.version,
                     source="port-banner",
                     location=location,
-                    os=port.os,
+                    os=port_os,
                 )
             )
     return out

@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Parse MySQL/MariaDB handshake and grade DB exposure by auth state instead of always CRITICAL.
 - Account for distro backports in CVE matching; mark banner-only matches as unconfirmed and exclude them from headline critical count.
+- Derive the distro/OS tag from nmap port banners when `Port.os` is empty so backported OpenSSH/nginx versions are capped at low confidence.
 - Proceed on self-signed or IP TLS certificates instead of aborting the target.
 - Probe RTSP/camera ports (`554`, `8554`) for default credentials.
 - Do not treat infrastructure server software as an OS.

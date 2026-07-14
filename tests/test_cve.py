@@ -81,6 +81,43 @@ def test_software_from_ports_ssh_banner() -> None:
     assert any(s.name == "openssh" and s.version == "8.7" for s in software)
 
 
+def test_software_from_ports_ssh_space_version() -> None:
+    scan = PortScan(
+        scanner="nmap",
+        ports=(
+            Port(
+                port=22,
+                service="ssh",
+                product="OpenSSH",
+                version="9.6p1 Ubuntu 3ubuntu13.18 (Ubuntu Linux; protocol 2.0)",
+            ),
+        ),
+    )
+    software = software_from_ports(scan)
+    ssh = next(s for s in software if s.name == "openssh")
+    assert ssh.version == "9.6p1"
+    assert "Ubuntu" in ssh.os
+
+
+def test_match_cves_marks_nmap_ssh_banner_unconfirmed() -> None:
+    scan = PortScan(
+        scanner="nmap",
+        ports=(
+            Port(
+                port=22,
+                service="ssh",
+                product="OpenSSH",
+                version="9.6p1 Ubuntu 3ubuntu13.18 (Ubuntu Linux; protocol 2.0)",
+            ),
+        ),
+    )
+    software = software_from_ports(scan)
+    cves = match_cves(software)
+    assert cves
+    assert all(c.unconfirmed for c in cves)
+    assert all(c.confidence == 40 for c in cves)
+
+
 def test_distro_tag_detects_backport_suffixes() -> None:
     assert _distro_tag("nginx/1.24.0 (Ubuntu)") == "Ubuntu"
     assert _distro_tag("OpenSSH_9.6p1 Ubuntu-3ubuntu13.18") == "Ubuntu"
