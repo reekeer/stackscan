@@ -209,6 +209,11 @@ def _tls_section(report: ScanReport) -> RenderableType | None:
     grid = Table.grid(padding=(0, 1))
     grid.add_column(style="bold cyan", no_wrap=True, justify="right")
     grid.add_column(overflow="fold")
+    if not tls.trusted:
+        grid.add_row(
+            "Trust",
+            Text("⚠ self-signed / untrusted certificate", style=f"bold {theme.WARN}"),
+        )
     if tls.issuer:
         ca_kind = _ca_kind(tls.issuer)
         issued_by = _issuer_org(tls.issuer)

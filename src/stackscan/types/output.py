@@ -66,6 +66,7 @@ class TlsInfo:
     protocol: str | None = None
     cipher: str | None = None
     alpn: str | None = None
+    trusted: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -77,6 +78,7 @@ class TlsInfo:
             "protocol": self.protocol,
             "cipher": self.cipher,
             "alpn": self.alpn,
+            "trusted": self.trusted,
         }
 
 

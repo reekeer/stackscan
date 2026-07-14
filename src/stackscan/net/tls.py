@@ -43,28 +43,38 @@ def _subject_alt_names(cert: dict[str, Any]) -> tuple[str, ...]:
 def fetch_tls_info(
     host: str, port: int = 443, *, timeout: float = 8.0, insecure: bool = False
 ) -> TlsInfo | None:
-    if insecure:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-    else:
-        context = ssl.create_default_context()
+    insecure_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    insecure_context.check_hostname = False
+    insecure_context.verify_mode = ssl.CERT_NONE
     try:
-        context.set_alpn_protocols(["h2", "http/1.1"])
+        insecure_context.set_alpn_protocols(["h2", "http/1.1"])
     except NotImplementedError:
         pass
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:
-            with context.wrap_socket(sock, server_hostname=host) as tls:
+            with insecure_context.wrap_socket(sock, server_hostname=host) as tls:
                 raw_cert = tls.getpeercert()
                 protocol = tls.version()
                 cipher_tuple = tls.cipher()
                 alpn = tls.selected_alpn_protocol()
     except (OSError, ssl.SSLError, ValueError):
         return None
+    trusted = True
+    if not insecure:
+        verify_context = ssl.create_default_context()
+        try:
+            verify_context.set_alpn_protocols(["h2", "http/1.1"])
+        except NotImplementedError:
+            pass
+        try:
+            with socket.create_connection((host, port), timeout=timeout) as sock:
+                with verify_context.wrap_socket(sock, server_hostname=host) as tls:
+                    tls.getpeercert()
+        except (OSError, ssl.SSLError, ValueError):
+            trusted = False
     cipher = cipher_tuple[0] if cipher_tuple else None
     if not raw_cert:
-        return TlsInfo(protocol=protocol, cipher=cipher, alpn=alpn)
+        return TlsInfo(protocol=protocol, cipher=cipher, alpn=alpn, trusted=trusted)
     cert = cast("dict[str, Any]", raw_cert)
     return TlsInfo(
         subject=_join_rdn(cert.get("subject")) or None,
@@ -75,4 +85,5 @@ def fetch_tls_info(
         protocol=protocol,
         cipher=cipher,
         alpn=alpn,
+        trusted=trusted,
     )

@@ -63,17 +63,19 @@ def _http_url(host: str, port: int, tls: bool) -> str:
 async def _fetch_with_fallback(
     url: str, session: StackscanSession, options: ScanOptions, report: ScanReport
 ) -> tuple[FetchResult | None, str]:
-    attempts = [url]
+    attempts: list[tuple[str, bool]] = [(url, options.insecure)]
+    if is_https(url) and not options.insecure:
+        attempts.append((url, True))
     if is_https(url):
-        attempts.append("http://" + url.split("://", 1)[1])
+        attempts.append(("http://" + url.split("://", 1)[1], False))
     first_error: str | None = None
-    for attempt in attempts:
+    for attempt, insecure in attempts:
         try:
             fetched = await session.fetch(
                 attempt,
                 timeout=options.timeout,
                 user_agent=options.user_agent,
-                insecure=options.insecure,
+                insecure=insecure,
                 max_bytes=options.max_bytes,
             )
         except Exception as exc:
