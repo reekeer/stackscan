@@ -133,3 +133,6 @@ frameworks.schema.json
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# stackscan genereted reports 
+stackscan-report.html

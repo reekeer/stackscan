@@ -1370,10 +1370,14 @@ wheels = [
 [[package]]
 name = "sigdb"
 version = "1.0.2"
-source = { git = "https://github.com/reekeer/sigdb.git#2fe0b389f0dfdb5a2374ea5bccdba78b1b6fb281" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pynacl" },
     { name = "zstandard" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/97/34/c9e2d4718ef849e313c9955e6e9c71d48f6e56fc73507d5a9caaaf5453e7/sigdb-1.0.2.tar.gz", hash = "sha256:0ee3df22d812b6a030b40889f0bad616e85e0e9df8870dee71d4d7ca84a7e9c3", size = 12396, upload-time = "2026-07-14T06:11:08.406Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/9f/ff1903d65fd4441c4ba8f4c1c4f88a5772be097d02cf8bd0628584eae090/sigdb-1.0.2-py3-none-any.whl", hash = "sha256:e293a0f867e0729cc9025fe979cdc2c5d7c54be1358c4c6592f39a87314495f8", size = 18222, upload-time = "2026-07-14T06:11:07.181Z" },
 ]
 
 [[package]]
@@ -1392,6 +1396,7 @@ dev = [
     { name = "black" },
     { name = "build" },
     { name = "cibuildwheel" },
+    { name = "geoip2" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "ruff" },
@@ -1408,13 +1413,14 @@ requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "cibuildwheel", marker = "extra == 'dev'", specifier = ">=2.16" },
     { name = "dnspython", specifier = ">=2.6" },
+    { name = "geoip2", marker = "extra == 'dev'", specifier = ">=4.8" },
     { name = "geoip2", marker = "extra == 'geo'", specifier = ">=4.8" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-nmap", specifier = ">=0.7" },
     { name = "rich", specifier = ">=13.7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
-    { name = "sigdb", git = "https://github.com/reekeer/sigdb.git" },
+    { name = "sigdb", specifier = ">=1.0.2" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=5.0" },
 ]
 provides-extras = ["dev", "geo"]
