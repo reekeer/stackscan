@@ -86,10 +86,6 @@ def _collect_votes(report: ScanReport) -> dict[str, list[tuple[str, str]]]:
         for software in site.software:
             if software.os:
                 add(host, software.os, software.source)
-        server = site.infra.server
-        if server:
-            for value in server:
-                add(host, value, "infra:server")
 
     return votes
 
