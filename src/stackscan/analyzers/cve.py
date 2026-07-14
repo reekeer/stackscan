@@ -218,19 +218,16 @@ _SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
 
 
 def _confidence(version: str, rng: dict[str, str], source: str) -> int:
-    score = 55
     comps = len([c for c in re.split("[.\\-_]", version) if c[:1].isdigit()])
-    if comps >= 3:
-        score += 20
-    elif comps >= 2:
-        score += 12
     bounded = ("start_incl" in rng or "start_excl" in rng) and (
         "end_incl" in rng or "end_excl" in rng
     )
-    score += 12 if bounded else 6
-    if source in _AUTHORITATIVE:
-        score += 12
-    return max(30, min(98, score))
+    authoritative = source in _AUTHORITATIVE
+    if authoritative and bounded and comps >= 3:
+        return 98
+    if (authoritative or bounded) and comps >= 2:
+        return 91
+    return 85
 
 
 @dataclass

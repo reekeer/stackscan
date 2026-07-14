@@ -51,7 +51,14 @@ def test_match_cves_hits_vulnerable_nginx() -> None:
     assert "CVE-2021-23017" in ids
     hit = next(c for c in cves if c.id == "CVE-2021-23017")
     assert hit.severity == "HIGH"
-    assert 30 <= hit.confidence <= 98
+    assert hit.confidence in (85, 91, 98)
+
+
+def test_confidence_resolves_to_fixed_tiers() -> None:
+    software = extract_software({"server": "nginx/1.18.0"}, "")
+    cves = match_cves(software)
+    assert cves
+    assert all(c.confidence in (85, 91, 98) for c in cves)
 
 
 def test_match_cves_excludes_patched_version_for_a_cve() -> None:
