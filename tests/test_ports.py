@@ -81,3 +81,17 @@ def test_fingerprint_mysql_err_packet_is_auth_refused() -> None:
     data = bytes([0x15, 0x00, 0x00, 0x00, 0xFF]) + b"\x00" * 21
     product, version, os, refused = fingerprint_mysql(data)
     assert refused is True
+
+
+def test_fingerprint_mysql_detects_el_centos() -> None:
+    data = _mysql_handshake("5.5.5-10.6.16-MariaDB-1.el8")
+    product, version, os, refused = fingerprint_mysql(data)
+    assert product == "MariaDB"
+    assert os == "RHEL/CentOS 8"
+
+
+def test_fingerprint_mysql_detects_fedora() -> None:
+    data = _mysql_handshake("5.5.5-10.6.16-MariaDB-1.fc38")
+    product, version, os, refused = fingerprint_mysql(data)
+    assert product == "MariaDB"
+    assert os == "Fedora 38"

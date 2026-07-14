@@ -110,3 +110,11 @@ def test_match_cves_clean_upstream_keeps_normal_confidence() -> None:
     assert cves
     assert not any(c.unconfirmed for c in cves)
     assert all(c.confidence in (85, 91, 98) for c in cves)
+
+
+def test_match_cves_marks_centos_banner_unconfirmed() -> None:
+    software = extract_software({"server": "nginx/1.24.0 (CentOS)"}, "")
+    cves = match_cves(software)
+    assert cves
+    assert all(c.unconfirmed for c in cves)
+    assert all(c.confidence == 40 for c in cves)

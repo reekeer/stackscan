@@ -19,10 +19,29 @@ _BANNER_SIGNATURES: tuple[tuple[re.Pattern[str], str, str], ...] = (
 )
 _HTTP_SERVER_RE = re.compile("^server:\\s*(.+?)\\s*$", re.I | re.M)
 _SERVER_TOKEN_RE = re.compile("([A-Za-z][A-Za-z0-9._+-]*?)/([\\w.]+)")
-_DISTRO_TAG_RE = re.compile(
-    "(?P<os>(?:ubuntu|debian|centos|rhel|fedora|amzn|raspbian|alpine|rocky|almalinux))"
-    "[-_ \\s]?(?P<version>[\\d.]+(?:[\\w._+-]*?)?)",
-    re.I,
+_DISTRO_PATTERNS: tuple[tuple[re.Pattern[str], str, int | None], ...] = (
+    (re.compile(r"0ubuntu0[._](\d[\d.]+)", re.I), "Ubuntu", 1),
+    (re.compile(r"\bubuntu[-_\s]?(\d[\d._]*)(?!ubuntu)", re.I), "Ubuntu", 1),
+    (re.compile(r"\bubuntu\b", re.I), "Ubuntu", None),
+    (re.compile(r"\+?deb(\d+)u?(\d+)?", re.I), "Debian", 1),
+    (re.compile(r"\bdebian[_-]?(\d[\d._]*)?", re.I), "Debian", 1),
+    (re.compile(r"\b(red\s*hat(?:\s*enterprise\s*linux|\s*linux)?|rhel)[-_\s]?(\d[\d._]*)?", re.I), "Red Hat", 2),
+    (re.compile(r"\bcentos[-_\s]?(\d[\d._]*)?", re.I), "CentOS", 1),
+    (re.compile(r"\bfedora[-_\s]?(\d[\d._]*)?", re.I), "Fedora", 1),
+    (re.compile(r"\brocky\s*linux?[-_\s]?(\d[\d._]*)?", re.I), "Rocky Linux", 1),
+    (re.compile(r"\balmalinux[-_\s]?(\d[\d._]*)?", re.I), "AlmaLinux", 1),
+    (re.compile(r"\balpine[-_\s]?(\d[\d._]*)?", re.I), "Alpine", 1),
+    (re.compile(r"\bamazon\s*linux?[-_\s]?(\d[\d._]*)?", re.I), "Amazon Linux", 1),
+    (re.compile(r"\bamzn[-_\s]?(\d[\d._]*)?", re.I), "Amazon Linux", 1),
+    (re.compile(r"\braspbian[-_\s]?(\d[\d._]*)?", re.I), "Raspbian", 1),
+    (re.compile(r"\bsuse\b", re.I), "SUSE", None),
+    (re.compile(r"\bopensuse\b", re.I), "openSUSE", None),
+    (re.compile(r"\barch\s*linux\b", re.I), "Arch Linux", None),
+    (re.compile(r"\bgentoo\b", re.I), "Gentoo", None),
+    (re.compile(r"\bslackware\b", re.I), "Slackware", None),
+    (re.compile(r"\bel(\d+)\b", re.I), "RHEL/CentOS", 1),
+    (re.compile(r"\.fc(\d+)\b", re.I), "Fedora", 1),
+    (re.compile(r"~bpo(\d+)\+[\w]+", re.I), "Debian Backports", 1),
 )
 
 
@@ -31,23 +50,19 @@ def sanitize_banner(text: str) -> str:
 
 
 def extract_distro(text: str) -> str | None:
-    lower = text.lower()
-    ubuntu_match = re.search(r"0ubuntu0[._](\d[\d.]+)", lower)
-    if ubuntu_match:
-        return f"Ubuntu {ubuntu_match.group(1)}"
-    if "ubuntu" in lower:
-        return "Ubuntu"
-    debian_match = re.search(r"\+?deb(\d+)u?(\d+)?", lower)
-    if debian_match:
-        return f"Debian {debian_match.group(1)}"
-    match = _DISTRO_TAG_RE.search(text)
-    if not match:
-        return None
-    os = match.group("os").strip().title()
-    version = match.group("version").strip("-_ ")
-    if version:
-        return f"{os} {version}"
-    return os
+    for pattern, name, version_group in _DISTRO_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        version = None
+        if version_group:
+            group = match.group(version_group)
+            if group:
+                version = group.strip("._- ")
+        if version:
+            return f"{name} {version}"
+        return name
+    return None
 
 
 def fingerprint_banner(banner: str) -> tuple[str | None, str | None, str | None]:

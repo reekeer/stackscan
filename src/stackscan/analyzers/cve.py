@@ -14,9 +14,9 @@ from stackscan.types import CveMatch, Headers, PortScan, Software
 CveEntry = dict[str, Any]
 _BACKPORT_DISTRO_RE = re.compile(
     r"(0?ubuntu0?[._]\d[\d.]+)"
+    r"|\b(ubuntu|debian|centos|rhel|red\s*hat|fedora|amzn|amazon|rocky|almalinux|alpine|raspbian|suse|opensuse)\b"
     r"|(\+deb\d+u?\d*)"
     r"|(-\d+ubuntu\d+(?![\d._]))"
-    r"|\b(ubuntu|debian|centos|rhel|fedora|amzn|raspbian|alpine|rocky|almalinux)\b"
     r"|(el\d+)"
     r"|(\.fc\d+)"
     r"|(~bpo\d+\+[\w]+)",

@@ -34,6 +34,8 @@ def _normalize_os(name: str) -> str:
         return "Debian"
     if "centos" in lower:
         return "CentOS"
+    if "rhel/centos" in lower:
+        return "RHEL/CentOS"
     if "rhel" in lower or "red hat" in lower:
         return "Red Hat"
     if "fedora" in lower:
