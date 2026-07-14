@@ -18,6 +18,7 @@ def _matcher(tmp_path: Path) -> SigDBMatcher:
             "html": [{"tag": "meta", "attr": "name", "value": "generator"}],
             "meta": {"generator": "wordpress"},
         },
+        "MyFramework": {"framework": ["my-fw-button"]},
     }
     out = tmp_path / "tech.sigdb"
     build_sigdb(rules=rules, output_path=out)
@@ -55,3 +56,16 @@ def test_confidence_reflects_evidence_strength(tmp_path: Path) -> None:
     nginx = next(tech for tech in analyzer.detect(result) if tech.name == "nginx")
     assert nginx.confidence == 100
     assert 1 <= nginx.confidence <= 100
+
+
+def test_detects_framework_from_class_tokens(tmp_path: Path) -> None:
+    analyzer = TechAnalyzer([_matcher(tmp_path)])
+    result = FetchResult(
+        url="https://example.com",
+        status=200,
+        headers={},
+        body='<button class="my-fw-button primary">x</button>',
+        cookies=(),
+    )
+    names = {tech.name for tech in analyzer.detect(result)}
+    assert "MyFramework" in names

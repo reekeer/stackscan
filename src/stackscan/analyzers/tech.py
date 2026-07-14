@@ -36,6 +36,22 @@ def _script_srcs(html: str) -> list[str]:
     return [match.group(1) for match in _SCRIPT_SRC_RE.finditer(html)]
 
 
+_CLASS_ATTR_RE = re.compile(r'\bclass\s*=\s*"([^"]*)"|\bclass\s*=\s*\'([^\']*)\'', re.I)
+
+
+def _framework_tokens(html: str) -> tuple[str, ...]:
+    tokens: set[str] = set()
+    for match in _CLASS_ATTR_RE.finditer(html):
+        value = match.group(1) or match.group(2)
+        if not value:
+            continue
+        for token in value.split():
+            token = token.strip()
+            if len(token) >= 3:
+                tokens.add(token)
+    return tuple(tokens)
+
+
 @dataclass
 class _Hit:
     name: str
@@ -154,6 +170,10 @@ class TechAnalyzer:
             self._add(acc, matcher.match_html(result.body), "html")
             self._add(acc, matcher.match(result.body), "body")
             self._add(acc, matcher.match(result.url), "url")
+            for token in _framework_tokens(result.body):
+                self._add(
+                    acc, matcher.match_search({"framework": token}), f"framework:{token}"
+                )
         self._curated(acc, result)
         by_name: dict[str, _Hit] = {}
         for hit in acc.values():
