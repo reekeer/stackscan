@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Derive the distro/OS tag from nmap port banners when `Port.os` is empty so backported OpenSSH/nginx versions are capped at low confidence.
+- Recognize Oracle Linux and SLES as backporting distros in CVE detection.
+
 ## [2.2.2] - 2026-07-14
 
 ### Added
