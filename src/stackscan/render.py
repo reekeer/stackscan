@@ -77,51 +77,54 @@ def _network_section(report: ScanReport) -> RenderableType | None:
     net = report.network
     if net is None:
         return None
-    grid = Table.grid(padding=(0, 1))
-    grid.add_column(style="bold cyan", no_wrap=True, justify="right")
-    grid.add_column(overflow="fold")
 
-    def row(label: str, values: tuple[str, ...]) -> None:
-        if values:
-            grid.add_row(label, ", ".join(values))
+    rows: list[tuple[str, str, str]] = []
+    host = net.host
 
-    row("IPv4", _sorted_ips(net.ipv4))
-    row("IPv6", _sorted_ips(net.ipv6))
-    row("CNAME", net.cname)
-    if net.reverse_dns:
-        grid.add_row("PTR", ", ".join((f"{ip} -> {name}" for ip, name in net.reverse_dns.items())))
-    row("MX", net.mx)
-    row("NS", net.ns)
-    row("TXT", net.txt)
-    row("SOA", net.soa)
-    row("CAA", net.caa)
-    if net.domains:
-        grid.add_row("Domains", ", ".join(sorted(set(net.domains))))
+    def add(rrtype: str, target: str, values: tuple[str, ...]) -> None:
+        for value in values:
+            rows.append((rrtype, target, value))
+
+    add("A", host, _sorted_ips(net.ipv4))
+    add("AAAA", host, _sorted_ips(net.ipv6))
+    add("CNAME", host, net.cname)
+    add("MX", host, net.mx)
+    add("NS", host, net.ns)
+    add("TXT", host, net.txt)
+    add("SOA", host, net.soa)
+    add("CAA", host, net.caa)
+    for ip, name in sorted(net.reverse_dns.items(), key=lambda x: _ip_sort_key(x[0])):
+        rows.append(("PTR", ip, name))
     if net.geo:
-        parts = [f"{ip}: {', '.join(v for v in data.values())}" for ip, data in net.geo.items()]
-        grid.add_row("Geo", "; ".join(parts))
-    if not grid.row_count:
+        for ip, data in sorted(net.geo.items(), key=lambda x: _ip_sort_key(x[0])):
+            rows.append(("Geo", ip, ", ".join(v for v in data.values() if v)))
+
+    if not rows:
         return None
-    return grid
+
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Type", style="bold cyan", no_wrap=True)
+    table.add_column("Host", overflow="fold")
+    table.add_column("Content", overflow="fold")
+    table.add_column("TTL", justify="right", no_wrap=True)
+    for rrtype, target, value in rows:
+        ttl = ""
+        if rrtype in net.dns_ttl:
+            ttl = str(net.dns_ttl[rrtype])
+        table.add_row(rrtype, target, value, ttl)
+    return table
 
 
 def _infra_section(report: ScanReport) -> RenderableType | None:
+    """Render infrastructure notes only; CDN/WAF/Proxy/Server live in the technologies table."""
     infra = report.infra
+    if not infra.notes:
+        return None
     grid = Table.grid(padding=(0, 1))
     grid.add_column(style="bold cyan", no_wrap=True, justify="right")
     grid.add_column(overflow="fold")
-    if infra.cdn:
-        grid.add_row("CDN", ", ".join(infra.cdn))
-    if infra.waf:
-        grid.add_row("WAF", Text(", ".join(infra.waf), style="green"))
-    if infra.server:
-        grid.add_row("Server", ", ".join(infra.server))
-    if infra.proxy:
-        grid.add_row("Proxy", ", ".join(infra.proxy))
     for note in infra.notes:
         grid.add_row("Note", Text(note, style="dim"))
-    if not grid.row_count:
-        return None
     return grid
 
 
@@ -250,7 +253,7 @@ def _tech_section(report: ScanReport) -> RenderableType | None:
         ))
 
     for tech in all_techs:
-        category = tech.categories[0] if tech.categories else "uncategorized"
+        category = ", ".join(tech.categories) if tech.categories else "uncategorized"
         _add_row(tech.name, tech.version, category, tech.location, tech.confidence)
 
     all_software = list(report.software)

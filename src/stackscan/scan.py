@@ -42,6 +42,7 @@ from stackscan.types import (
     BruteTarget,
     CredFinding,
     FetchResult,
+    InfraInfo,
     IpInfo,
     NetworkInfo,
     Port,
@@ -219,6 +220,7 @@ async def _resolve_network(host: str, options: ScanOptions, geo: GeoProvider) ->
         reverse_dns=dns.reverse_dns,
         geo=geo_map,
         domains=domains,
+        dns_ttl=dns.ttl,
     )
 
 
@@ -263,9 +265,12 @@ def _merge_technologies(primary: list[Technology], extra: list[Technology]) -> l
             by_name[key] = tech
         else:
             combined_evidence = tuple(dict.fromkeys((*existing.evidence, *tech.evidence)))
+            combined_categories = tuple(
+                dict.fromkeys((*existing.categories, *tech.categories))
+            )
             by_name[key] = Technology(
                 name=existing.name,
-                categories=existing.categories or tech.categories,
+                categories=combined_categories or existing.categories,
                 evidence=combined_evidence,
                 location=existing.location or tech.location,
                 confidence=max(existing.confidence, tech.confidence),
@@ -316,8 +321,9 @@ async def _scan_site(
         except Exception:
             tls = None
 
+    site_host = host_of(fetched.url)
     technologies = analyzer.detect(fetched)
-    software = extract_software(fetched.headers, fetched.body, location=host_of(fetched.url))
+    software = extract_software(fetched.headers, fetched.body, location=site_host)
     if options.probe_404:
         not_found = await _probe_404(session, fetched.url, options)
         if not_found is not None:
@@ -327,13 +333,16 @@ async def _scan_site(
                 extract_software(not_found.headers, not_found.body, location=host_of(not_found.url)),
             )
 
+    infra = analyze_infra(fetched.headers, tuple(fetched.cookies), host)
+    technologies = _merge_technologies(technologies, _infra_technologies(infra, site_host))
+
     return SiteFinding(
         url=url,
         final_url=fetched.url,
         status=fetched.status,
         technologies=technologies,
         software=software,
-        infra=analyze_infra(fetched.headers, tuple(fetched.cookies), host),
+        infra=infra,
         security=analyze_security_headers(fetched.headers),
         exposure=await analyze_exposure(session, fetched.url, probe) if options.probe else None,
         protocols=_http_protocols(fetched, tls),
@@ -724,6 +733,28 @@ async def _detect_creds_smart(
     return (findings, candidates)
 
 
+def _infra_technologies(infra: InfraInfo, host: str) -> list[Technology]:
+    """Convert infrastructure findings into technology rows for the flat table."""
+    techs: list[Technology] = []
+    for name in infra.cdn:
+        techs.append(
+            Technology(name=name, categories=("cdn",), evidence=("header",), location=host)
+        )
+    for name in infra.waf:
+        techs.append(
+            Technology(name=name, categories=("waf",), evidence=("header",), location=host)
+        )
+    for name in infra.proxy:
+        techs.append(
+            Technology(name=name, categories=("proxy",), evidence=("header",), location=host)
+        )
+    for name in infra.server:
+        techs.append(
+            Technology(name=name, categories=("infrastructure",), evidence=("header:server",), location=host)
+        )
+    return techs
+
+
 async def scan_target(
     url: str,
     *,
@@ -769,6 +800,9 @@ async def scan_target(
             report.status = fetched.status
             report.technologies = matchers_analyzer.detect(fetched)
             report.infra = analyze_infra(fetched.headers, tuple(fetched.cookies), host)
+            report.technologies = _merge_technologies(
+                report.technologies, _infra_technologies(report.infra, host_of(fetched.url))
+            )
             report.security = analyze_security_headers(fetched.headers)
             report.protocols = _http_protocols(fetched, report.tls)
             report.secrets = scan_secrets(

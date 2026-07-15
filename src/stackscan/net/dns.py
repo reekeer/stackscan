@@ -26,6 +26,7 @@ class DnsResult:
     caa: tuple[str, ...] = ()
     resolver_available: bool = False
     extras: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
+    ttl: dict[str, int] = field(default_factory=dict[str, int])
 
 
 def _addrinfo(host: str, family: int) -> list[str]:
@@ -73,7 +74,7 @@ def _load_resolver() -> Any | None:
     return cast("Any", _dns_resolver)
 
 
-def _query(resolver: Any, host: str, rdtype: str) -> list[str]:
+def _query(resolver: Any, host: str, rdtype: str) -> tuple[list[str], int]:
     from dns import exception as _dns_exc  # type: ignore[import-untyped]
 
     answers: Any = None
@@ -84,17 +85,18 @@ def _query(resolver: Any, host: str, rdtype: str) -> list[str]:
         except (_dns_exc.Timeout, _dns_exc.DNSException) as exc:
             if attempt + 1 < _DNS_ATTEMPTS and isinstance(exc, _dns_exc.Timeout):
                 continue
-            return []
+            return [], 0
         except Exception:
-            return []
+            return [], 0
     if answers is None:
-        return []
+        return [], 0
+    ttl: int = int(getattr(answers, "ttl", 0) or 0)
     values: list[str] = []
     for rdata in cast("list[Any]", answers):
         text = _format_rdata(rdtype, rdata)
         if text and text not in values:
             values.append(text)
-    return values
+    return values, ttl
 
 
 def _format_rdata(rdtype: str, rdata: Any) -> str:
@@ -129,10 +131,10 @@ def _format_rdata(rdtype: str, rdata: Any) -> str:
     return str(rdata).rstrip(".")
 
 
-def _extended_records(host: str) -> dict[str, tuple[str, ...]]:
+def _extended_records(host: str) -> tuple[dict[str, tuple[str, ...]], dict[str, int]]:
     resolver_mod = _load_resolver()
     if resolver_mod is None:
-        return {}
+        return {}, {}
     resolver = resolver_mod.Resolver()
     resolver.timeout = _QUERY_TIMEOUT
     resolver.lifetime = _QUERY_LIFETIME
@@ -140,13 +142,17 @@ def _extended_records(host: str) -> dict[str, tuple[str, ...]]:
         futures = {
             rdtype: pool.submit(_query, resolver, host, rdtype) for rdtype in _EXTENDED_TYPES
         }
-        return {rdtype: tuple(future.result()) for rdtype, future in futures.items()}
+        results = {rdtype: future.result() for rdtype, future in futures.items()}
+    return (
+        {rdtype: tuple(values) for rdtype, (values, _) in results.items()},
+        {rdtype: ttl for rdtype, (_, ttl) in results.items() if ttl},
+    )
 
 
 def resolve_host(host: str, *, reverse: bool = True) -> DnsResult:
     ipv4 = tuple(_addrinfo(host, socket.AF_INET))
     ipv6 = tuple(_addrinfo(host, socket.AF_INET6))
-    records = _extended_records(host)
+    records, ttls = _extended_records(host)
     reverse_map: dict[str, str] = {}
     if reverse:
         for ip in (*ipv4, *ipv6):
@@ -165,4 +171,5 @@ def resolve_host(host: str, *, reverse: bool = True) -> DnsResult:
         soa=records.get("SOA", ()),
         caa=records.get("CAA", ()),
         resolver_available=bool(records),
+        ttl=ttls,
     )

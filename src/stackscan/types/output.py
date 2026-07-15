@@ -40,6 +40,7 @@ class NetworkInfo:
     reverse_dns: dict[str, str] = field(default_factory=dict[str, str])
     geo: dict[str, dict[str, str]] = field(default_factory=dict[str, dict[str, str]])
     domains: tuple[str, ...] = ()
+    dns_ttl: dict[str, int] = field(default_factory=dict[str, int])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +56,7 @@ class NetworkInfo:
             "reverse_dns": self.reverse_dns,
             "geo": self.geo,
             "domains": list(self.domains),
+            "dns_ttl": self.dns_ttl,
         }
 
 
