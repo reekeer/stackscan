@@ -443,7 +443,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
                 return True
         return False
 
-    _stage_count = 7
+    _stage_count = 20
     semaphore = asyncio.Semaphore(max(args.concurrency, 1))
     async with StackscanSession() as session:
         if not is_json_terminal():

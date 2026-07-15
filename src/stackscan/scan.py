@@ -622,24 +622,28 @@ async def _scan_ports_on_ips(
     ips: set[str],
     options: ScanOptions,
     cdn_ips: set[str] | None = None,
+    log: Callable[[str], None] | None = None,
 ) -> tuple[PortScan | None, dict[str, PortScan]]:
     cdn_ips = cdn_ips or set()
     ips = {ip for ip in ips if ip not in cdn_ips}
     if not ips or not options.ports:
         return (None, {})
     semaphore = asyncio.Semaphore(max(options.workers // 10, 4))
+    total = len(ips)
 
-    async def one(ip: str) -> tuple[str, PortScan]:
+    async def one(ip: str, index: int) -> tuple[str, PortScan]:
+        if log is not None:
+            log(f"scanning ports on {ip} ({index}/{total})")
         async with semaphore:
             scan = await scan_ports(
                 ip,
                 timeout=options.port_timeout,
                 prefer_nmap=options.prefer_nmap,
-                workers=max(options.workers // len(ips), 20),
+                workers=max(options.workers // total, 20),
             )
         return (ip, scan)
 
-    results = await asyncio.gather(*(one(ip) for ip in ips))
+    results = await asyncio.gather(*(one(ip, i + 1) for i, ip in enumerate(ips)))
     per_ip: dict[str, PortScan] = {ip: scan for ip, scan in results}
     seen_ports: set[tuple[str | None, int]] = set()
     all_ports: list[Port] = []
@@ -836,7 +840,7 @@ async def scan_target(
 
         if options.smart_scan:
             stage(f"scanning ports on {len(ips - cdn_ips)} host(s)")
-            report.ports, _ = await _scan_ports_on_ips(ips, options, cdn_ips=cdn_ips)
+            report.ports, _ = await _scan_ports_on_ips(ips, options, cdn_ips=cdn_ips, log=stage)
         elif options.ports and host:
             stage("scanning ports")
             report.ports = await scan_ports(
