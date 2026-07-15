@@ -24,6 +24,7 @@ from stackscan.analyzers import (
     parse_social,
     software_from_ports,
 )
+from stackscan.analyzers.vibe import detect_vibe_code
 from stackscan.net import (
     GeoProvider,
     enrich_ips,
@@ -323,11 +324,13 @@ async def _scan_site(
 
     site_host = host_of(fetched.url)
     technologies = analyzer.detect(fetched)
+    technologies.extend(detect_vibe_code(fetched.body))
     software = extract_software(fetched.headers, fetched.body, location=site_host)
     if options.probe_404:
         not_found = await _probe_404(session, fetched.url, options)
         if not_found is not None:
             technologies = _merge_technologies(technologies, analyzer.detect(not_found))
+            technologies.extend(detect_vibe_code(not_found.body))
             software = _merge_software(
                 software,
                 extract_software(not_found.headers, not_found.body, location=host_of(not_found.url)),
@@ -799,6 +802,7 @@ async def scan_target(
             report.final_url = fetched.url
             report.status = fetched.status
             report.technologies = matchers_analyzer.detect(fetched)
+            report.technologies.extend(detect_vibe_code(fetched.body))
             report.infra = analyze_infra(fetched.headers, tuple(fetched.cookies), host)
             report.technologies = _merge_technologies(
                 report.technologies, _infra_technologies(report.infra, host_of(fetched.url))
