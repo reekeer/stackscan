@@ -73,18 +73,6 @@ def _sorted_ips(ips: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(sorted(ips, key=_ip_sort_key))
 
 
-def _confidence_bar(pct: int) -> Text:
-    filled = round(pct / 10)
-    bar = "█" * filled + "░" * (10 - filled)
-    if pct >= 80:
-        color = theme.SUCCESS
-    elif pct >= 50:
-        color = theme.WARN
-    else:
-        color = theme.DANGER
-    return Text(f"{bar} {pct}%", style=color)
-
-
 def _network_section(report: ScanReport) -> RenderableType | None:
     net = report.network
     if net is None:
@@ -245,13 +233,6 @@ def _tls_section(report: ScanReport) -> RenderableType | None:
 def _tech_section(report: ScanReport) -> RenderableType | None:
 
     all_techs = report.all_technologies()
-    grouped: dict[str, list[str]] = {}
-    for tech in all_techs:
-        for category in tech.categories or ("uncategorized",):
-            grouped.setdefault(category, [])
-            if tech.name not in grouped[category]:
-                grouped[category].append(tech.name)
-
     all_software = list(report.software)
     for site in report.site_findings:
         all_software.extend(site.software)
@@ -260,29 +241,42 @@ def _tech_section(report: ScanReport) -> RenderableType | None:
     )
     software = [f"{sw.name} {sw.version}" if sw.version else sw.name for sw in ordered]
     software = list(dict.fromkeys(software))
-    if not grouped and not software:
+    if not all_techs and not software:
         return None
-    grid = Table.grid(padding=(0, 1))
-    grid.add_column(style="bold magenta", no_wrap=True, justify="right")
-    grid.add_column(overflow="fold")
-    for category in sorted(grouped):
-        labels: list[str] = []
-        for tech in all_techs:
-            if category in (tech.categories or ("uncategorized",)):
-                label = tech.name
-                if tech.version:
-                    if re.fullmatch(r"[a-f0-9]{7,40}", tech.version):
-                        label += f" ({tech.version})"
-                    else:
-                        label += f" v{tech.version}"
-                if tech.location and tech.location != host_of(report.url):
-                    label += f" @{tech.location}"
-                label += f" [{theme.MUTED}]({tech.confidence}%)[/]"
-                labels.append(label)
-        grid.add_row(category, ", ".join(sorted(set(labels))))
-    if software:
-        grid.add_row("versions", ", ".join(software))
-    return grid
+
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Category", style="bold magenta", no_wrap=True)
+    table.add_column("Name", overflow="fold")
+    table.add_column("Version", overflow="fold")
+    table.add_column("Host", overflow="fold")
+    table.add_column("Conf", justify="right", no_wrap=True)
+
+    seen: set[tuple[str, str | None, str]] = set()
+    rows: list[tuple[str, str, str, str, str]] = []
+    for tech in sorted(
+        all_techs,
+        key=lambda t: (t.categories[0] if t.categories else "zzz", t.name.lower()),
+    ):
+        category = tech.categories[0] if tech.categories else "uncategorized"
+        version = tech.version or "-"
+        host = (
+            tech.location
+            if tech.location and tech.location != host_of(report.url)
+            else "-"
+        )
+        key = (tech.name.lower(), tech.version, tech.location)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append((category, tech.name, version, host, f"{tech.confidence}%"))
+    for row in rows:
+        table.add_row(*row)
+
+    if not rows and not software:
+        return None
+    if not software:
+        return table
+    return Group(table, Text(f"versions: {', '.join(software)}", style="dim"))
 
 
 def _sev_text(severity: str) -> Text:
@@ -301,7 +295,14 @@ def _service_cell(product: str, service: str | None) -> str:
 def _services_section(report: ScanReport) -> RenderableType | None:
 
     ports = report.ports.ports if report.ports else ()
-    tech_services = [s for s in report.services if not s.evidence.startswith("port ")]
+    # Only show meaningful service findings (admin panels, databases, etc.).
+    # Generic "service" kinds derived from technologies already live in the
+    # Technologies & Software table.
+    tech_services = [
+        s
+        for s in report.services
+        if not s.evidence.startswith("port ") and s.kind != "service"
+    ]
     if not ports and not tech_services:
         if report.ports is not None:
             return Text(f"no services found ({report.ports.scanner})", style="dim")
@@ -345,26 +346,25 @@ def _cve_section(report: ScanReport) -> RenderableType | None:
         return None
     table = Table(box=None, expand=True, pad_edge=False)
     table.add_column("Severity", no_wrap=True)
+    table.add_column("Conf", justify="right", no_wrap=True)
     table.add_column("CVE", style="bold", no_wrap=True)
     table.add_column("Affects", no_wrap=True)
     table.add_column("Where", overflow="fold")
-    table.add_column("Source", overflow="fold")
-    table.add_column("Confidence", no_wrap=True)
     table.add_column("Summary", overflow="fold")
     for cve in report.cves:
         affects = f"{cve.product} {cve.version}" if cve.version else cve.product
         if cve.unconfirmed:
-            affects += "  ·  unconfirmed · version-only"
-        summary = cve.summary if len(cve.summary) <= 80 else cve.summary[:77] + "..."
+            affects += " · unconfirmed"
+        where = _fmt_locations(cve.locations) or _fmt_locations(cve.sources)
+        summary = cve.summary if len(cve.summary) <= 120 else cve.summary[:117] + "..."
         if cve.caveat:
             summary = f"{cve.caveat} — {summary}"
         table.add_row(
             _severity_text(cve),
+            f"{cve.confidence}%",
             cve.id,
             affects,
-            _fmt_locations(cve.locations),
-            _fmt_locations(cve.sources),
-            _confidence_bar(cve.confidence),
+            where,
             summary,
         )
     return table
