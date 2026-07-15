@@ -115,10 +115,73 @@ def _zone_transfer(apex: str) -> dict[str, tuple[str, ...]]:
     return found
 
 
+_PRIORITY_LABELS: tuple[str, ...] = (
+    "www",
+    "www2",
+    "www3",
+    "web",
+    "web1",
+    "web2",
+    "api",
+    "api1",
+    "api2",
+    "app",
+    "admin",
+    "auth",
+    "login",
+    "portal",
+    "dashboard",
+    "cdn",
+    "static",
+    "assets",
+    "files",
+    "download",
+    "git",
+    "gitlab",
+    "github",
+    "jenkins",
+    "grafana",
+    "kibana",
+    "prometheus",
+    "status",
+    "test",
+    "dev",
+    "staging",
+    "demo",
+    "vpn",
+    "mail",
+    "mail1",
+    "mail2",
+    "mx",
+    "mx1",
+    "mx2",
+    "smtp",
+    "imap",
+    "pop",
+    "webmail",
+    "postal",
+    "forum",
+    "blog",
+    "docs",
+    "help",
+    "support",
+    "shop",
+    "store",
+    "minecraft",
+    "curseforge",
+    "ftp",
+    "sftp",
+    "ssh",
+    "ns",
+    "ns1",
+    "ns2",
+)
+
+
 def _ordered_labels(limit: int) -> tuple[str, ...]:
     seen: set[str] = set()
     ordered: list[str] = []
-    for label in (*load_bundled_wordlist(), *load_wordlist()):
+    for label in (*_PRIORITY_LABELS, *load_bundled_wordlist(), *load_wordlist()):
         if label not in seen:
             seen.add(label)
             ordered.append(label)
@@ -379,10 +442,14 @@ async def _resolve_into(
     for name, addrs in resolved.items():
         source = sources.get(name, "dns")
 
+        # Only drop obvious wildcard hits from the raw wordlist when the
+        # resolved addresses exactly match the wildcard set and no other
+        # source already validated the name.
         if (
             wildcard
-            and source not in ("tls-san", "dns-record", "axfr", "crt.sh")
+            and source == "dns-wordlist"
             and (set(addrs) <= wildcard)
+            and name not in discovered
         ):
             continue
         discovered.setdefault(name, Subdomain(name=name, addresses=addrs, source=source))
