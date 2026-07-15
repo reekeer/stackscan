@@ -433,6 +433,30 @@ def _secrets_section(report: ScanReport) -> RenderableType | None:
     return table
 
 
+def _takeovers_section(report: ScanReport) -> RenderableType | None:
+    if not report.takeovers:
+        return None
+    table = Table(box=None, pad_edge=False, expand=True)
+    table.add_column("Subdomain", style="bold cyan", overflow="fold")
+    table.add_column("Service", overflow="fold")
+    table.add_column("CNAME", overflow="fold")
+    table.add_column("Severity", no_wrap=True)
+    table.add_column("Evidence", overflow="fold")
+    for takeover in sorted(
+        report.takeovers, key=lambda t: (t.verified, t.severity), reverse=True
+    ):
+        color = theme.SEVERITY.get(takeover.severity.upper(), theme.MUTED)
+        verified = "verified" if takeover.verified else "potential"
+        table.add_row(
+            takeover.subdomain,
+            takeover.service,
+            takeover.cname,
+            Text(f" {takeover.severity.upper()} ", style=f"bold {color}"),
+            f"{takeover.evidence} ({verified})",
+        )
+    return table
+
+
 def _subdomains_section(report: ScanReport) -> RenderableType | None:
     if not report.subdomains:
         return None
@@ -535,6 +559,7 @@ _SECTIONS: tuple[tuple[str, _SectionBuilder], ...] = (
     ("Hosts & OS", _os_section),
     ("Default creds / open devices", _creds_section),
     ("Secrets & leaks", _secrets_section),
+    ("Subdomain takeovers", _takeovers_section),
     ("Subdomains", _subdomains_section),
     ("Security headers", _security_section),
     ("Exposure", _exposure_section),

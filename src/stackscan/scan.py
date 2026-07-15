@@ -37,6 +37,7 @@ from stackscan.net.ipinfo import is_cdn_host, is_public_ip
 from stackscan.net.subdomains import RECURSIVE_PREFIXES, hostnames_in_records, load_bundled_wordlist
 from stackscan.scanners.isp_blocked import detect_isp_block
 from stackscan.scanners.secrets import scan_secrets
+from stackscan.scanners.takeover import detect_takeovers
 from stackscan.types import (
     BruteTarget,
     CredFinding,
@@ -793,6 +794,16 @@ async def scan_target(
             else _aval(None)
         )
         report.subdomains, report.exposure = await asyncio.gather(sub_coro, exp_coro)
+
+        if options.subdomains and report.subdomains:
+            stage("checking for subdomain takeovers")
+            report.takeovers = await detect_takeovers(
+                report.subdomains,
+                session,
+                timeout=min(options.timeout, 8.0),
+                user_agent=options.user_agent,
+                workers=max(options.workers // 10, 5),
+            )
 
         ips = _collect_ips(report)
         cdn_ips: set[str] = set()

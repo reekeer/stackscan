@@ -19,6 +19,7 @@ from stackscan.types.output import (
     SocialLink,
     Software,
     Subdomain,
+    TakeoverFinding,
     Technology,
     TlsInfo,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "ScanReport",
     "SecretFinding",
     "SecurityHeaders",
+    "TakeoverFinding",
     "ServiceFinding",
     "SiteFinding",
     "SocialLink",

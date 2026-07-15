@@ -292,6 +292,26 @@ class SecretFinding:
 
 
 @dataclass(frozen=True)
+class TakeoverFinding:
+    subdomain: str
+    service: str
+    cname: str
+    severity: str = "MEDIUM"
+    verified: bool = False
+    evidence: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "subdomain": self.subdomain,
+            "service": self.service,
+            "cname": self.cname,
+            "severity": self.severity,
+            "verified": self.verified,
+            "evidence": self.evidence,
+        }
+
+
+@dataclass(frozen=True)
 class SiteFinding:
     url: str
     final_url: str | None = None
@@ -403,6 +423,7 @@ class ScanReport:
     ip_info: list[IpInfo] = field(default_factory=list[IpInfo])
     creds: list[CredFinding] = field(default_factory=list[CredFinding])
     secrets: list[SecretFinding] = field(default_factory=list[SecretFinding])
+    takeovers: list[TakeoverFinding] = field(default_factory=list[TakeoverFinding])
     protocols: list[str] = field(default_factory=list[str])
     site_findings: list[SiteFinding] = field(default_factory=list[SiteFinding])
     services: list[ServiceFinding] = field(default_factory=list[ServiceFinding])
@@ -446,6 +467,7 @@ class ScanReport:
             "ip_info": [info.to_dict() for info in self.ip_info],
             "creds": [finding.to_dict() for finding in self.creds],
             "secrets": [secret.to_dict() for secret in self.secrets],
+            "takeovers": [takeover.to_dict() for takeover in self.takeovers],
             "protocols": list(self.protocols),
             "site_findings": [site.to_dict() for site in self.site_findings],
             "services": [service.to_dict() for service in self.services],
