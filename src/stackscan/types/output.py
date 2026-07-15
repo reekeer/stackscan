@@ -274,6 +274,24 @@ class CredFinding:
 
 
 @dataclass(frozen=True)
+class SecretFinding:
+    name: str
+    value: str
+    source: str = ""
+    location: str = ""
+    severity: str = "HIGH"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "value": self.value,
+            "source": self.source,
+            "location": self.location,
+            "severity": self.severity,
+        }
+
+
+@dataclass(frozen=True)
 class SiteFinding:
     url: str
     final_url: str | None = None
@@ -384,6 +402,7 @@ class ScanReport:
     subdomains: list[Subdomain] = field(default_factory=list[Subdomain])
     ip_info: list[IpInfo] = field(default_factory=list[IpInfo])
     creds: list[CredFinding] = field(default_factory=list[CredFinding])
+    secrets: list[SecretFinding] = field(default_factory=list[SecretFinding])
     protocols: list[str] = field(default_factory=list[str])
     site_findings: list[SiteFinding] = field(default_factory=list[SiteFinding])
     services: list[ServiceFinding] = field(default_factory=list[ServiceFinding])
@@ -426,6 +445,7 @@ class ScanReport:
             "subdomains": [sub.to_dict() for sub in self.subdomains],
             "ip_info": [info.to_dict() for info in self.ip_info],
             "creds": [finding.to_dict() for finding in self.creds],
+            "secrets": [secret.to_dict() for secret in self.secrets],
             "protocols": list(self.protocols),
             "site_findings": [site.to_dict() for site in self.site_findings],
             "services": [service.to_dict() for service in self.services],

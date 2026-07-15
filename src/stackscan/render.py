@@ -414,6 +414,25 @@ def _creds_section(report: ScanReport) -> RenderableType | None:
     return table
 
 
+def _secrets_section(report: ScanReport) -> RenderableType | None:
+    if not report.secrets:
+        return None
+    table = Table(box=None, pad_edge=False, expand=True)
+    table.add_column("Type", style="bold cyan", no_wrap=True)
+    table.add_column("Value", overflow="fold")
+    table.add_column("Severity", no_wrap=True)
+    table.add_column("Location", overflow="fold")
+    for secret in sorted(report.secrets, key=lambda s: s.severity):
+        color = theme.SEVERITY.get(secret.severity.upper(), theme.MUTED)
+        table.add_row(
+            secret.name,
+            secret.value,
+            Text(f" {secret.severity.upper()} ", style=f"bold {color}"),
+            secret.location or "-",
+        )
+    return table
+
+
 def _subdomains_section(report: ScanReport) -> RenderableType | None:
     if not report.subdomains:
         return None
@@ -515,6 +534,7 @@ _SECTIONS: tuple[tuple[str, _SectionBuilder], ...] = (
     ("Services & open ports", _services_section),
     ("Hosts & OS", _os_section),
     ("Default creds / open devices", _creds_section),
+    ("Secrets & leaks", _secrets_section),
     ("Subdomains", _subdomains_section),
     ("Security headers", _security_section),
     ("Exposure", _exposure_section),

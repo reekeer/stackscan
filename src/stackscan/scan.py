@@ -36,6 +36,7 @@ from stackscan.net import (
 from stackscan.net.ipinfo import is_cdn_host, is_public_ip
 from stackscan.net.subdomains import RECURSIVE_PREFIXES, hostnames_in_records, load_bundled_wordlist
 from stackscan.scanners.isp_blocked import detect_isp_block
+from stackscan.scanners.secrets import scan_secrets
 from stackscan.types import (
     BruteTarget,
     CredFinding,
@@ -748,6 +749,9 @@ async def scan_target(
             report.infra = analyze_infra(fetched.headers, tuple(fetched.cookies), host)
             report.security = analyze_security_headers(fetched.headers)
             report.protocols = _http_protocols(fetched, report.tls)
+            report.secrets = scan_secrets(
+                fetched.body, location=host_of(fetched.url) if fetched else host or ""
+            )
             if options.parse_social:
                 report.social = parse_social(fetched.body, fetched.url)
 
