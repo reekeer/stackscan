@@ -7,10 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--cve-min-confidence` flag (default 50) to suppress low-confidence CVE noise.
+- Virtual-host (vhost) brute on discovered web ports to find subdomains that do not appear in DNS or certificate transparency logs.
+- Passive subdomain extraction from the primary page body, JavaScript, and links.
+- Generic detection of services that expose a commit hash as `Product Core (hash)`.
+- Expanded bundled DNS wordlist with common SaaS/platform labels.
+
 ### Fixed
 
+- Filter out CSS utility class tokens (e.g. `backdrop-blur`, `px-4`) so they no longer trigger false framework matches such as "Backdrop".
+- Grade backported CVE confidence by range precision: vague "before X" ranges get lower confidence than pinned ranges.
 - Derive the distro/OS tag from nmap port banners when `Port.os` is empty so backported OpenSSH/nginx versions are capped at low confidence.
 - Recognize Oracle Linux and SLES as backporting distros in CVE detection.
+- Reject REJECTED/replaced/deprecated CVEs and entries without an English summary when rebuilding the offline CVE database.
 
 ## [2.2.2] - 2026-07-14
 

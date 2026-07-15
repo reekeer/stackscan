@@ -79,7 +79,7 @@ stackscan --cve-online example.com
 
 # Speed / coverage knobs
 stackscan --full --workers 500 --subdomain-limit 10000 example.com
-stackscan --full --site-limit 10 --workers 200 example.com
+stackscan --full --site-limit 20 --workers 200 example.com
 
 # JSON (full detail, includes timing) or a compact table
 stackscan --json example.com
@@ -131,7 +131,8 @@ Below are performance benchmarks conducted on two production targets using diffe
 | `--ports` / `--no-nmap` | off | Active port scan (nmap, else Python) / force the Python scanner. |
 | `--subdomains` | off | Enumerate subdomains (AXFR + wordlist + TLS SANs). |
 | `--subdomain-limit` | `5000` | Max ranked labels to resolve (`0` = full list). |
-| `--site-limit` | `20` | Max derived sites to analyze from discovered open ports (`0` = unlimited). |
+| `--site-limit` | `50` | Max derived sites to analyze from discovered open ports (`0` = unlimited). |
+| `--cve-min-confidence` | `50` | Hide CVE matches with confidence below N (`0` shows all). |
 | `--default-creds` | off | Bounded default-credential / open-device check (prompts before brute-forcing). |
 | `--full-auto` | off | Auto-accept every brute prompt on discovered devices (enables default-cred checks). |
 | `--cred-limit` | `50` | Max default-credential pairs per device (`0` = full SecLists list). |
