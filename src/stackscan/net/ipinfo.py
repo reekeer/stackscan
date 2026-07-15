@@ -10,13 +10,7 @@ _IPWHO_URL = "https://ipwho.is/"
 _CDN_KEYWORDS = (
     "cloudflare",
     "fastly",
-    "akamai",
     "cloudfront",
-    "amazon",
-    "aws",
-    "google",
-    "microsoft",
-    "azure",
     "incapsula",
     "imperva",
     "sucuri",
@@ -29,6 +23,11 @@ _CDN_KEYWORDS = (
     "gcore",
     "edgio",
     "verizon",
+    "aliyun",
+    "tencent",
+    "wangsu",
+    "cdn",
+    "waf",
 )
 
 
