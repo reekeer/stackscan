@@ -138,6 +138,16 @@ def ranges_for(cve: dict[str, Any], needle: str) -> list[dict[str, str]]:
     return out
 
 
+def _skip_entry(cve: dict[str, Any]) -> bool:
+    status = str(cve.get("vulnStatus", "")).upper()
+    if status in {"REJECTED", "REPLACED", "DEPRECATED"}:
+        return True
+    descriptions = cve.get("descriptions") or []
+    if not english_summary(descriptions):
+        return True
+    return False
+
+
 def collect(product: str, vendor_product: str, throttle: float) -> list[dict[str, Any]]:
     needle = ":" + vendor_product + ":"
     entries: list[dict[str, Any]] = []
@@ -149,6 +159,8 @@ def collect(product: str, vendor_product: str, throttle: float) -> list[dict[str
         vulns = payload.get("vulnerabilities") or []
         for wrapper in vulns:
             cve = wrapper["cve"]
+            if _skip_entry(cve):
+                continue
             ranges = ranges_for(cve, needle)
             if not ranges:
                 continue
