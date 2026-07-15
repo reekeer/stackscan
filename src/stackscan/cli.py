@@ -383,15 +383,14 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
             def _stage_log(message: str, _t: str = target) -> None:
                 nonlocal stage_index
                 stage_index += 1
-                pct = round(stage_index / stage_total * 100)
                 progress_obj.update(
                     task_id,
                     advance=1,
-                    description=f"[~] {_t} · {stage_index}/{stage_total} ({pct}%) {message}",
+                    description=f"[~] {_t} · {message}",
                 )
 
             stage_log = _stage_log
-            progress_obj.update(task_id, description=f"[~] {target} · starting... (0%)")
+            progress_obj.update(task_id, description=f"[~] {target} · starting...")
 
         report = await scan_target(
             target,

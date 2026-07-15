@@ -739,7 +739,7 @@ async def scan_target(
             log(message)
 
     async with semaphore:
-        stage("resolving DNS · fetching page · TLS handshake")
+        stage("resolving DNS & fetching page")
         tls_coro = (
             asyncio.to_thread(fetch_tls_info, host, port_of(url), insecure=options.insecure)
             if options.tls and host and is_https(url)
@@ -760,7 +760,7 @@ async def scan_target(
                 report.status = fetched.status
                 report.elapsed = perf_counter() - started
                 return report
-            stage("parsing page · detecting technologies")
+            stage("parsing page & detecting technologies")
             report.final_url = fetched.url
             report.status = fetched.status
             report.technologies = matchers_analyzer.detect(fetched)
@@ -779,7 +779,7 @@ async def scan_target(
                 bits.append("enumerating subdomains")
             if options.probe and fetched is not None:
                 bits.append("probing exposure")
-            stage(" · ".join(bits))
+            stage(" & ".join(bits))
         san = report.tls.subject_alt_names if report.tls else ()
         content_hosts: set[str] = (
             hostnames_in_records((fetched.body,), host) if fetched and host else set()
@@ -874,7 +874,7 @@ async def scan_target(
             )
 
         if options.ip_info or options.default_creds or (options.cve and options.cve_online):
-            stage("IP intelligence · default-cred checks")
+            stage("IP intelligence & default-cred checks")
         online_coro = (
             match_cves_online(
                 _all_software(report), min_confidence=max(0, options.cve_min_confidence)
