@@ -169,7 +169,7 @@ def _service_from_tech(tech: Technology) -> ServiceFinding | None:
         if category in {"database", "service", "infrastructure", "security"}:
             return ServiceFinding(
                 name=tech.name,
-                kind=category if category != "service" else "service",
+                kind="service" if category in {"service", "infrastructure", "security"} else category,
                 evidence=" ".join(tech.evidence) or f"category: {category}",
                 severity=_SEVERITY.get(category, "INFO"),
             )

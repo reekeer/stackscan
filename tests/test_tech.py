@@ -69,3 +69,114 @@ def test_detects_framework_from_class_tokens(tmp_path: Path) -> None:
     )
     names = {tech.name for tech in analyzer.detect(result)}
     assert "MyFramework" in names
+
+
+def test_tailwind_utilities_do_not_emulate_frameworks(tmp_path: Path) -> None:
+    rules: dict[str, Any] = {
+        "Backdrop": {"headers": {"X-Generator": "Backdrop"}},
+        "MyFramework": {"framework": ["my-fw-button"]},
+    }
+    sigdb = tmp_path / "tech.sigdb"
+    build_sigdb(rules=rules, output_path=sigdb)
+    analyzer = TechAnalyzer([SigDBMatcher(load_sigdb(sigdb))])
+    result = FetchResult(
+        url="https://example.com",
+        status=200,
+        headers={},
+        body='<div class="my-fw-button px-4 backdrop-blur flex grid">x</div>',
+        cookies=(),
+    )
+    names = {tech.name for tech in analyzer.detect(result)}
+    assert "MyFramework" in names
+    assert "Backdrop" not in names
+
+
+def test_detects_generic_core_commit_service(tmp_path: Path) -> None:
+    analyzer = TechAnalyzer([_matcher(tmp_path)])
+    result = FetchResult(
+        url="https://example.com",
+        status=200,
+        headers={},
+        body="CurseForge Core (a26fded)",
+        cookies=(),
+    )
+    techs = {tech.name: tech for tech in analyzer.detect(result)}
+    assert "CurseForge" in techs
+    assert techs["CurseForge"].version == "a26fded"
+    assert "service" in techs["CurseForge"].categories
+
+
+def test_detects_apache_and_does_not_confuse_with_nginx(tmp_path: Path) -> None:
+    rules: dict[str, Any] = {
+        "nginx": {"headers": {"Server": "nginx"}},
+        "Apache": {"headers": {"Server": "Apache"}},
+    }
+    sigdb = tmp_path / "tech.sigdb"
+    build_sigdb(rules=rules, output_path=sigdb)
+    analyzer = TechAnalyzer([SigDBMatcher(load_sigdb(sigdb))])
+
+    apache_result = FetchResult(
+        url="https://example.com",
+        status=200,
+        headers={"server": "Apache/2.4.57 (Ubuntu)"},
+        body="",
+        cookies=(),
+    )
+    techs = {tech.name: tech for tech in analyzer.detect(apache_result)}
+    assert "Apache" in techs
+    assert "nginx" not in techs
+
+    nginx_result = FetchResult(
+        url="https://example.com",
+        status=200,
+        headers={"server": "nginx/1.24.0"},
+        body="",
+        cookies=(),
+    )
+    techs = {tech.name: tech for tech in analyzer.detect(nginx_result)}
+    assert "nginx" in techs
+    assert "Apache" not in techs
+
+
+def test_detects_nginx_from_404_body_when_header_is_plain(tmp_path: Path) -> None:
+    analyzer = TechAnalyzer([_matcher(tmp_path)])
+    result = FetchResult(
+        url="https://example.com/unknown",
+        status=404,
+        headers={"server": "cloudflare"},
+        body="<html><body><hr><center>nginx/1.24.0</center></body></html>",
+        cookies=(),
+    )
+    techs = {tech.name: tech for tech in analyzer.detect(result)}
+    assert "nginx" in techs
+    assert techs["nginx"].version == "1.24.0"
+    assert "infrastructure" in techs["nginx"].categories
+
+
+def test_detects_apache_from_404_body(tmp_path: Path) -> None:
+    analyzer = TechAnalyzer([_matcher(tmp_path)])
+    result = FetchResult(
+        url="https://example.com/unknown",
+        status=404,
+        headers={},
+        body="<html><body>Apache/2.4.57 Server at example.com Port 443</body></html>",
+        cookies=(),
+    )
+    techs = {tech.name: tech for tech in analyzer.detect(result)}
+    assert "Apache" in techs
+    assert techs["Apache"].version == "2.4.57"
+
+
+def test_detects_generic_service_from_powered_by_footer(tmp_path: Path) -> None:
+    analyzer = TechAnalyzer([_matcher(tmp_path)])
+    result = FetchResult(
+        url="https://example.com",
+        status=200,
+        headers={},
+        body="<footer>Powered by CurseForge v2.11.4</footer>",
+        cookies=(),
+    )
+    techs = {tech.name: tech for tech in analyzer.detect(result)}
+    assert "CurseForge" in techs
+    assert techs["CurseForge"].version == "2.11.4"
+    assert "service" in techs["CurseForge"].categories
