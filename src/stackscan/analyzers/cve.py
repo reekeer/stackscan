@@ -9,7 +9,7 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any, cast
 
-from stackscan.analyzers.generic import extract_generic_software, is_commit_hash
+from stackscan.analyzers.generic import SERVER_NAMES, extract_generic_software, is_commit_hash
 from stackscan.types import CveMatch, Headers, PortScan, Software
 
 CveEntry = dict[str, Any]
@@ -181,8 +181,26 @@ def extract_software(headers: Headers, body: str, location: str = "") -> list[So
     server = headers.get("server")
     if server:
         server_os = _distro_tag(server)
-        for item in _tokens(server, "header:server", location, os=server_os):
+        server_items = _tokens(server, "header:server", location, os=server_os)
+        for item in server_items:
             add(item)
+        # If the Server banner names a known product without a version (e.g.
+        # "nginx" or "Apache"), still record it so it shows up in the software
+        # table even when no CVE can be matched yet.
+        if not server_items:
+            server_lower = server.lower()
+            for name in sorted(SERVER_NAMES, key=len, reverse=True):
+                if name in server_lower:
+                    add(
+                        Software(
+                            name=name.lower().replace(" ", ""),
+                            version=None,
+                            source="header:server",
+                            location=location,
+                            os=server_os,
+                        )
+                    )
+                    break
     powered = headers.get("x-powered-by")
     if powered:
         for item in _tokens(powered, "header:x-powered-by", location):
