@@ -225,6 +225,10 @@ async def _resolve_network(host: str, options: ScanOptions, geo: GeoProvider) ->
 _FALLBACK_404_PATHS = [
     lambda: f"stackscan-{secrets.token_urlsafe(8).lower()}",
     lambda: f"stackscan-{secrets.token_urlsafe(6).lower()}.php",
+    lambda: f"stackscan-{secrets.token_urlsafe(6).lower()}.aspx",
+    lambda: f"stackscan-{secrets.token_urlsafe(6).lower()}.jsp",
+    lambda: f"stackscan-{secrets.token_urlsafe(6).lower()}.py",
+    lambda: f"stackscan-{secrets.token_urlsafe(6).lower()}.json",
     lambda: f"stackscan-{secrets.token_urlsafe(6).lower()}/",
 ]
 
