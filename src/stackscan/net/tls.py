@@ -40,6 +40,22 @@ def _subject_alt_names(cert: dict[str, Any]) -> tuple[str, ...]:
     return tuple(names)
 
 
+def _tls_conn(
+    host: str, port: int, timeout: float, context: ssl.SSLContext
+) -> tuple[dict[str, Any] | None, str | None, tuple[str, str, int] | None, str | None] | None:
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            with context.wrap_socket(sock, server_hostname=host) as tls:
+                return (
+                    cast("dict[str, Any] | None", tls.getpeercert()),
+                    tls.version(),
+                    tls.cipher(),
+                    tls.selected_alpn_protocol(),
+                )
+    except (OSError, ssl.SSLError, ValueError):
+        return None
+
+
 def fetch_tls_info(
     host: str, port: int = 443, *, timeout: float = 8.0, insecure: bool = False
 ) -> TlsInfo | None:
@@ -50,15 +66,12 @@ def fetch_tls_info(
         insecure_context.set_alpn_protocols(["h2", "http/1.1"])
     except NotImplementedError:
         pass
-    try:
-        with socket.create_connection((host, port), timeout=timeout) as sock:
-            with insecure_context.wrap_socket(sock, server_hostname=host) as tls:
-                raw_cert = tls.getpeercert()
-                protocol = tls.version()
-                cipher_tuple = tls.cipher()
-                alpn = tls.selected_alpn_protocol()
-    except (OSError, ssl.SSLError, ValueError):
+
+    insecure_result = _tls_conn(host, port, timeout, insecure_context)
+    if insecure_result is None:
         return None
+    raw_cert, protocol, cipher_tuple, alpn = insecure_result
+
     trusted = True
     if not insecure:
         verify_context = ssl.create_default_context()
@@ -66,22 +79,21 @@ def fetch_tls_info(
             verify_context.set_alpn_protocols(["h2", "http/1.1"])
         except NotImplementedError:
             pass
-        try:
-            with socket.create_connection((host, port), timeout=timeout) as sock:
-                with verify_context.wrap_socket(sock, server_hostname=host) as tls:
-                    tls.getpeercert()
-        except (OSError, ssl.SSLError, ValueError):
+        verify_result = _tls_conn(host, port, timeout, verify_context)
+        if verify_result is None:
             trusted = False
+        else:
+            raw_cert = verify_result[0] or raw_cert
+
     cipher = cipher_tuple[0] if cipher_tuple else None
     if not raw_cert:
         return TlsInfo(protocol=protocol, cipher=cipher, alpn=alpn, trusted=trusted)
-    cert = cast("dict[str, Any]", raw_cert)
     return TlsInfo(
-        subject=_join_rdn(cert.get("subject")) or None,
-        issuer=_join_rdn(cert.get("issuer")) or None,
-        subject_alt_names=_subject_alt_names(cert),
-        not_before=_as_str(cert.get("notBefore")),
-        not_after=_as_str(cert.get("notAfter")),
+        subject=_join_rdn(raw_cert.get("subject")) or None,
+        issuer=_join_rdn(raw_cert.get("issuer")) or None,
+        subject_alt_names=_subject_alt_names(raw_cert),
+        not_before=_as_str(raw_cert.get("notBefore")),
+        not_after=_as_str(raw_cert.get("notAfter")),
         protocol=protocol,
         cipher=cipher,
         alpn=alpn,
