@@ -143,6 +143,11 @@ def _tech_name(tech: Technology) -> str:
 
 
 def _service_from_tech(tech: Technology) -> ServiceFinding | None:
+    """Map meaningful technologies to service findings.
+
+    Generic infrastructure/proxy/service hits (nginx, Cloudflare, HTTP/3, …)
+    live in the Technologies table; they are intentionally not duplicated here.
+    """
     name = _tech_name(tech)
     if name in _ADMIN_TECHS:
         return ServiceFinding(
@@ -158,21 +163,6 @@ def _service_from_tech(tech: Technology) -> ServiceFinding | None:
             evidence=" ".join(tech.evidence) or f"tech: {tech.name}",
             severity=_SEVERITY["database"],
         )
-    if name in _SECURITY_TECHS:
-        return ServiceFinding(
-            name=_SECURITY_TECHS[name],
-            kind="service",
-            evidence=" ".join(tech.evidence) or f"tech: {tech.name}",
-            severity=_SEVERITY["service"],
-        )
-    for category in tech.categories or ():
-        if category in {"database", "service", "infrastructure", "security"}:
-            return ServiceFinding(
-                name=tech.name,
-                kind="service" if category in {"service", "infrastructure", "security"} else category,
-                evidence=" ".join(tech.evidence) or f"category: {category}",
-                severity=_SEVERITY.get(category, "INFO"),
-            )
     return None
 
 

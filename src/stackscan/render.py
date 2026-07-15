@@ -231,52 +231,48 @@ def _tls_section(report: ScanReport) -> RenderableType | None:
 
 
 def _tech_section(report: ScanReport) -> RenderableType | None:
-
+    """Render technologies and extracted software as a flat table."""
     all_techs = report.all_technologies()
+    rows: list[tuple[str, str, str, str, str]] = []
+    seen: set[tuple[str, str | None, str]] = set()
+
+    def _add_row(name: str, version: str | None, category: str, host: str, confidence: int) -> None:
+        key = (name.lower(), version, host)
+        if key in seen:
+            return
+        seen.add(key)
+        rows.append((
+            name,
+            version or "-",
+            category,
+            host if host and host != host_of(report.url) else "-",
+            f"{confidence}%",
+        ))
+
+    for tech in all_techs:
+        category = tech.categories[0] if tech.categories else "uncategorized"
+        _add_row(tech.name, tech.version, category, tech.location, tech.confidence)
+
     all_software = list(report.software)
     for site in report.site_findings:
         all_software.extend(site.software)
-    ordered = sorted(
-        all_software, key=lambda sw: (sw.name.lower(), _version_key(sw.version or ""))
-    )
-    software = [f"{sw.name} {sw.version}" if sw.version else sw.name for sw in ordered]
-    software = list(dict.fromkeys(software))
-    if not all_techs and not software:
+    for sw in all_software:
+        _add_row(sw.name, sw.version, "software", sw.location, 100)
+
+    if not rows:
         return None
+
+    rows.sort(key=lambda r: (r[2].lower(), r[0].lower(), _version_key(r[1])))
 
     table = Table(box=None, pad_edge=False)
-    table.add_column("Category", style="bold magenta", no_wrap=True)
-    table.add_column("Name", overflow="fold")
+    table.add_column("Name", style="bold cyan", overflow="fold")
     table.add_column("Version", overflow="fold")
+    table.add_column("Category", style="bold magenta", no_wrap=True)
     table.add_column("Host", overflow="fold")
     table.add_column("Conf", justify="right", no_wrap=True)
-
-    seen: set[tuple[str, str | None, str]] = set()
-    rows: list[tuple[str, str, str, str, str]] = []
-    for tech in sorted(
-        all_techs,
-        key=lambda t: (t.categories[0] if t.categories else "zzz", t.name.lower()),
-    ):
-        category = tech.categories[0] if tech.categories else "uncategorized"
-        version = tech.version or "-"
-        host = (
-            tech.location
-            if tech.location and tech.location != host_of(report.url)
-            else "-"
-        )
-        key = (tech.name.lower(), tech.version, tech.location)
-        if key in seen:
-            continue
-        seen.add(key)
-        rows.append((category, tech.name, version, host, f"{tech.confidence}%"))
     for row in rows:
         table.add_row(*row)
-
-    if not rows and not software:
-        return None
-    if not software:
-        return table
-    return Group(table, Text(f"versions: {', '.join(software)}", style="dim"))
+    return table
 
 
 def _sev_text(severity: str) -> Text:
@@ -346,7 +342,6 @@ def _cve_section(report: ScanReport) -> RenderableType | None:
         return None
     table = Table(box=None, expand=True, pad_edge=False)
     table.add_column("Severity", no_wrap=True)
-    table.add_column("Conf", justify="right", no_wrap=True)
     table.add_column("CVE", style="bold", no_wrap=True)
     table.add_column("Affects", no_wrap=True)
     table.add_column("Where", overflow="fold")
@@ -356,12 +351,11 @@ def _cve_section(report: ScanReport) -> RenderableType | None:
         if cve.unconfirmed:
             affects += " · unconfirmed"
         where = _fmt_locations(cve.locations) or _fmt_locations(cve.sources)
-        summary = cve.summary if len(cve.summary) <= 120 else cve.summary[:117] + "..."
+        summary = cve.summary if len(cve.summary) <= 160 else cve.summary[:157] + "..."
         if cve.caveat:
             summary = f"{cve.caveat} — {summary}"
         table.add_row(
             _severity_text(cve),
-            f"{cve.confidence}%",
             cve.id,
             affects,
             where,
