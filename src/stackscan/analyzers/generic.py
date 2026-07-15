@@ -4,7 +4,7 @@ import re
 
 from stackscan.types import Software, Technology
 
-_SERVER_NAMES: frozenset[str] = frozenset({
+SERVER_NAMES: frozenset[str] = frozenset({
     "nginx",
     "apache",
     "httpd",
@@ -88,7 +88,7 @@ _POWERED_BY_PLAIN_RE = re.compile(
 
 _SERVER_VERSION_RE = re.compile(
     r"\b("
-    + "|".join(re.escape(name) for name in sorted(_SERVER_NAMES, key=len, reverse=True))
+    + "|".join(re.escape(name) for name in sorted(SERVER_NAMES, key=len, reverse=True))
     + r")[/ ]v?(\d+\.\d+(?:\.\d+)?)",
     re.IGNORECASE,
 )
@@ -107,7 +107,7 @@ def _software_name(name: str) -> str:
 
 
 def _category(name: str) -> str:
-    if _software_name(name) in {n.replace(" ", "") for n in _SERVER_NAMES}:
+    if _software_name(name) in {n.replace(" ", "") for n in SERVER_NAMES}:
         return "infrastructure"
     return "service"
 
