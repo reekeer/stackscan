@@ -5,7 +5,7 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urljoin
 
 from stackscan.analyzers import (
@@ -33,7 +33,9 @@ from stackscan.net import (
     resolve_host,
     scan_ports,
 )
+from stackscan.net.ipinfo import is_cdn_host, is_public_ip
 from stackscan.net.subdomains import RECURSIVE_PREFIXES, hostnames_in_records, load_bundled_wordlist
+from stackscan.scanners.isp_blocked import detect_isp_block
 from stackscan.types import (
     BruteTarget,
     CredFinding,
@@ -64,6 +66,44 @@ def _http_url(host: str, port: int, tls: bool) -> str:
     if (tls and port == 443) or (not tls and port == 80):
         return f"{scheme}://{host}"
     return f"{scheme}://{host}:{port}"
+
+
+async def _cdn_ips(
+    ips: set[str], *, timeout: float = 8.0, workers: int = 5
+) -> set[str]:
+    import aiohttp
+
+    public = [ip for ip in ips if is_public_ip(ip)]
+    if not public:
+        return set()
+    semaphore = asyncio.Semaphore(max(workers, 1))
+    client_timeout = aiohttp.ClientTimeout(total=timeout)
+    cdn: set[str] = set()
+
+    async with aiohttp.ClientSession(timeout=client_timeout) as session:
+
+        async def check(ip: str) -> None:
+            async with semaphore:
+                try:
+                    async with session.get(
+                        f"https://ipwho.is/{ip}",
+                        headers={"User-Agent": "stackscan"},
+                    ) as resp:
+                        if resp.status != 200:
+                            return
+                        data = cast("dict[str, Any]", await resp.json())
+                except Exception:
+                    return
+            if not data.get("success"):
+                return
+            connection = cast("dict[str, Any]", data.get("connection") or {})
+            org = str(connection.get("org") or "")
+            isp = str(connection.get("isp") or "")
+            if is_cdn_host(org, isp):
+                cdn.add(ip)
+
+        await asyncio.gather(*(check(ip) for ip in public))
+    return cdn
 
 
 async def _fetch_with_fallback(
@@ -247,6 +287,9 @@ async def _scan_site(
         )
     except Exception as exc:
         return SiteFinding(url=url, error=str(exc))
+    block_msg = detect_isp_block(url, fetched)
+    if block_msg:
+        return SiteFinding(url=url, final_url=fetched.url, status=fetched.status, error=block_msg)
     host = host_of(url)
     if host and is_https(url):
         try:
@@ -434,10 +477,12 @@ async def discover_vhosts(
     session: StackscanSession,
     options: ScanOptions,
     body: str = "",
+    cdn_ips: set[str] | None = None,
 ) -> list[Subdomain]:
     if not options.full or not options.discover_sites:
         return []
-    ips = _collect_ips(report)
+    cdn_ips = cdn_ips or set()
+    ips = {ip for ip in _collect_ips(report) if ip not in cdn_ips}
     if not ips:
         return []
     port_scan = report.ports
@@ -557,7 +602,10 @@ def _all_software(report: ScanReport) -> list[Software]:
 async def _scan_ports_on_ips(
     ips: set[str],
     options: ScanOptions,
+    cdn_ips: set[str] | None = None,
 ) -> tuple[PortScan | None, dict[str, PortScan]]:
+    cdn_ips = cdn_ips or set()
+    ips = {ip for ip in ips if ip not in cdn_ips}
     if not ips or not options.ports:
         return (None, {})
     semaphore = asyncio.Semaphore(max(options.workers // 10, 4))
@@ -584,10 +632,11 @@ async def _scan_ports_on_ips(
             seen_ports.add(key)
             all_ports.append(port)
     all_ports.sort(key=lambda p: (p.host or "", p.port))
+    skipped = f", skipped {len(cdn_ips)} CDN/proxy IP(s)" if cdn_ips else ""
     merged = PortScan(
         scanner="nmap" if options.prefer_nmap else "connect",
         ports=tuple(all_ports),
-        note=f"scanned {len(per_ip)} host(s)",
+        note=f"scanned {len(per_ip)} host(s){skipped}",
     )
     return (merged, per_ip)
 
@@ -684,6 +733,14 @@ async def scan_target(
         )
 
         if fetched is not None:
+            block_msg = detect_isp_block(url, fetched)
+            if block_msg:
+                stage(block_msg)
+                report.error = block_msg
+                report.final_url = fetched.url
+                report.status = fetched.status
+                report.elapsed = perf_counter() - started
+                return report
             stage("parsing page · detecting technologies")
             report.final_url = fetched.url
             report.status = fetched.status
@@ -733,10 +790,21 @@ async def scan_target(
         )
         report.subdomains, report.exposure = await asyncio.gather(sub_coro, exp_coro)
 
+        ips = _collect_ips(report)
+        cdn_ips: set[str] = set()
+        if (options.smart_scan or options.ports) and ips:
+            stage("identifying CDN/proxy IPs")
+            cdn_ips = await _cdn_ips(
+                ips,
+                timeout=min(options.timeout, 8.0),
+                workers=max(options.workers // 10, 4),
+            )
+            if cdn_ips:
+                stage(f"skipping {len(cdn_ips)} CDN/proxy IP(s)")
+
         if options.smart_scan:
-            ips = _collect_ips(report)
-            stage(f"scanning ports on {len(ips)} host(s)")
-            report.ports, _ = await _scan_ports_on_ips(ips, options)
+            stage(f"scanning ports on {len(ips - cdn_ips)} host(s)")
+            report.ports, _ = await _scan_ports_on_ips(ips, options, cdn_ips=cdn_ips)
         elif options.ports and host:
             stage("scanning ports")
             report.ports = await scan_ports(
@@ -749,7 +817,7 @@ async def scan_target(
         if options.discover_sites:
             stage("probing derived sites")
             vhosts = await discover_vhosts(
-                report, session, options, body=fetched.body if fetched else ""
+                report, session, options, body=fetched.body if fetched else "", cdn_ips=cdn_ips
             )
             if vhosts:
                 report.subdomains.extend(vhosts)

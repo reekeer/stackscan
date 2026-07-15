@@ -40,9 +40,17 @@ def _is_public(ip: str) -> bool:
     return not (parsed.is_private or parsed.is_loopback or parsed.is_link_local)
 
 
+def is_public_ip(ip: str) -> bool:
+    return _is_public(ip)
+
+
 def _looks_like_cdn(*values: str | None) -> bool:
     blob = " ".join(v.lower() for v in values if v)
     return any(keyword in blob for keyword in _CDN_KEYWORDS)
+
+
+def is_cdn_host(*values: str | None) -> bool:
+    return _looks_like_cdn(*values)
 
 
 async def enrich_ips(
