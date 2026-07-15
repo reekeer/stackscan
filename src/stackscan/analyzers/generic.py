@@ -161,14 +161,25 @@ def extract_generic_tech(body: str) -> list[Technology]:
         if name and not _is_noise(name):
             remember(name, f"body:powered-by {name}", None)
 
+    core_spans: set[tuple[int, int]] = set()
     for match in _CORE_COMMIT_RE.finditer(body):
         name = _normalize_name(match.group(1))
         commit = match.group(2).lower()
         if name and not _is_noise(name):
             remember(name, f"body:{name} Core ({commit})", commit)
+        core_spans.add(match.span())
+
+    def _overlaps_core(span: tuple[int, int]) -> bool:
+        start, end = span
+        for c_start, c_end in core_spans:
+            if start < c_end and end > c_start:
+                return True
+        return False
 
     # Product name directly followed by a short hex commit (no "Core" keyword).
     for match in _COMMIT_AFTER_NAME_RE.finditer(body):
+        if _overlaps_core(match.span()):
+            continue
         name = _normalize_name(match.group(1))
         commit = match.group(2).lower()
         if name and not _is_noise(name) and is_commit_hash(commit):
@@ -229,13 +240,24 @@ def extract_generic_software(body: str, location: str = "") -> list[Software]:
         if name:
             add(name, None, f"body:powered-by {name}")
 
+    core_spans: set[tuple[int, int]] = set()
     for match in _CORE_COMMIT_RE.finditer(body):
         name = _normalize_name(match.group(1))
         commit = match.group(2).lower()
         if name:
             add(name, commit, f"body:core-commit {name} ({commit})")
+        core_spans.add(match.span())
+
+    def _overlaps_core(span: tuple[int, int]) -> bool:
+        start, end = span
+        for c_start, c_end in core_spans:
+            if start < c_end and end > c_start:
+                return True
+        return False
 
     for match in _COMMIT_AFTER_NAME_RE.finditer(body):
+        if _overlaps_core(match.span()):
+            continue
         name = _normalize_name(match.group(1))
         commit = match.group(2).lower()
         if name and is_commit_hash(commit):
