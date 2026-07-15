@@ -244,10 +244,19 @@ def _tls_section(report: ScanReport) -> RenderableType | None:
 
 def _tech_section(report: ScanReport) -> RenderableType | None:
 
-    grouped = report.by_category()
+    all_techs = report.all_technologies()
+    grouped: dict[str, list[str]] = {}
+    for tech in all_techs:
+        for category in tech.categories or ("uncategorized",):
+            grouped.setdefault(category, [])
+            if tech.name not in grouped[category]:
+                grouped[category].append(tech.name)
 
+    all_software = list(report.software)
+    for site in report.site_findings:
+        all_software.extend(site.software)
     ordered = sorted(
-        report.software, key=lambda sw: (sw.name.lower(), _version_key(sw.version or ""))
+        all_software, key=lambda sw: (sw.name.lower(), _version_key(sw.version or ""))
     )
     software = [f"{sw.name} {sw.version}" if sw.version else sw.name for sw in ordered]
     software = list(dict.fromkeys(software))
@@ -258,11 +267,14 @@ def _tech_section(report: ScanReport) -> RenderableType | None:
     grid.add_column(overflow="fold")
     for category in sorted(grouped):
         labels: list[str] = []
-        for tech in report.technologies:
+        for tech in all_techs:
             if category in (tech.categories or ("uncategorized",)):
                 label = tech.name
                 if tech.version:
-                    label += f" v{tech.version}"
+                    if re.fullmatch(r"[a-f0-9]{7,40}", tech.version):
+                        label += f" ({tech.version})"
+                    else:
+                        label += f" v{tech.version}"
                 if tech.location and tech.location != host_of(report.url):
                     label += f" @{tech.location}"
                 label += f" [{theme.MUTED}]({tech.confidence}%)[/]"
