@@ -222,21 +222,32 @@ async def _resolve_network(host: str, options: ScanOptions, geo: GeoProvider) ->
     )
 
 
+_FALLBACK_404_PATHS = [
+    lambda: f"stackscan-{secrets.token_urlsafe(8).lower()}",
+    lambda: f"stackscan-{secrets.token_urlsafe(6).lower()}.php",
+    lambda: f"stackscan-{secrets.token_urlsafe(6).lower()}/",
+]
+
+
 async def _probe_404(
     session: StackscanSession, base_url: str, options: ScanOptions
 ) -> FetchResult | None:
-    path = f"stackscan-{secrets.token_urlsafe(8).lower()}"
-    probe_url = urljoin(base_url.rstrip("/") + "/", path)
-    try:
-        return await session.fetch(
-            probe_url,
-            timeout=min(options.timeout, 4.0),
-            user_agent=options.user_agent,
-            insecure=options.insecure,
-            max_bytes=options.max_bytes,
-        )
-    except Exception:
-        return None
+    timeout = min(options.timeout, 4.0)
+    for path_factory in _FALLBACK_404_PATHS:
+        probe_url = urljoin(base_url.rstrip("/") + "/", path_factory())
+        try:
+            result = await session.fetch(
+                probe_url,
+                timeout=timeout,
+                user_agent=options.user_agent,
+                insecure=options.insecure,
+                max_bytes=options.max_bytes,
+            )
+        except Exception:
+            continue
+        if result.status in {404, 400, 401, 403, 500, 502, 503}:
+            return result
+    return None
 
 
 def _merge_technologies(primary: list[Technology], extra: list[Technology]) -> list[Technology]:
@@ -325,12 +336,14 @@ async def _scan_site(
     )
 
 
-def _collect_ips(report: ScanReport) -> set[str]:
+def _collect_ips(report: ScanReport, *, include_vhost: bool = False) -> set[str]:
     ips: set[str] = set()
     if report.network is not None:
         ips.update(report.network.ipv4)
         ips.update(report.network.ipv6)
     for sub in report.subdomains:
+        if not include_vhost and sub.source == "vhost":
+            continue
         ips.update(sub.addresses)
     return ips
 
@@ -498,7 +511,7 @@ async def discover_vhosts(
     if not targets:
         return []
     targets = list(dict.fromkeys(targets))
-    names = _vhost_candidate_names(report, _VHOST_MAX_CANDIDATES, body)
+    names = _vhost_candidate_names(report, min(options.subdomain_limit, _VHOST_MAX_CANDIDATES), body)
     if not names:
         return []
     baselines = await _vhost_baselines(
