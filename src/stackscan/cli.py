@@ -70,6 +70,13 @@ def _build_scan_parser() -> argparse.ArgumentParser:
         help='Skip passes by name, e.g. --disable "dns,tls,geo,probe,cve,ip-info,nmap".',
     )
     parser.add_argument(
+        "--parse",
+        dest="parse",
+        default="",
+        metavar="LIST",
+        help='Enable scan modules, e.g. --parse "subdomains,ports,creds,cve-online" or --parse all.',
+    )
+    parser.add_argument(
         "--parse-social",
         dest="parse_social",
         action="store_true",
@@ -224,6 +231,22 @@ _DISABLE_MAP: dict[str, str] = {
 }
 
 
+_PARSE_MAP: dict[str, str] = {
+    "subdomains": "subdomains",
+    "subdomain": "subdomains",
+    "social": "parse_social",
+    "socials": "parse_social",
+    "ports": "ports",
+    "port": "ports",
+    "creds": "default_creds",
+    "cred": "default_creds",
+    "default-creds": "default_creds",
+    "cve-online": "cve_online",
+    "cveonline": "cve_online",
+    "all": "all",
+}
+
+
 def _apply_disable(args: argparse.Namespace, console: Console) -> None:
     for attr in set(_DISABLE_MAP.values()):
         if not hasattr(args, attr):
@@ -240,6 +263,25 @@ def _apply_disable(args: argparse.Namespace, console: Console) -> None:
             )
             continue
         setattr(args, attr, True)
+
+
+def _apply_parse(args: argparse.Namespace, console: Console) -> None:
+    for token in args.parse.replace(" ", ",").split(","):
+        token = token.strip().lower().lstrip("-")
+        if not token:
+            continue
+        attr = _PARSE_MAP.get(token)
+        if attr is None:
+            _warn(
+                console,
+                f"unknown --parse module: {token} (known: {', '.join(sorted(_PARSE_MAP))})",
+            )
+            continue
+        if attr == "all":
+            for a in ("subdomains", "parse_social", "ports", "default_creds", "cve_online"):
+                setattr(args, a, True)
+        else:
+            setattr(args, attr, True)
 
 
 def _read_targets(path: Path | None, positional: Iterable[str]) -> list[str]:
@@ -748,6 +790,7 @@ def _scan_command(argv: list[str]) -> int:
     args.verbose = verbose_level
     err_console = Console(stderr=True)
     _apply_disable(args, err_console)
+    _apply_parse(args, err_console)
     if not getattr(args, "no_banner", False):
         render_banner(err_console)
     if (args.ports or args.full) and (not getattr(args, "no_nmap", False)) and (not nmap_available()):

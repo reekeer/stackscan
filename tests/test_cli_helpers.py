@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from stackscan.cli import _dedupe, _format_detected, _read_targets
+from stackscan.cli import _apply_parse, _dedupe, _format_detected, _read_targets
 from stackscan.utils import normalize_url
 
 
@@ -45,3 +45,29 @@ def test_read_targets_prepends_positional_targets(tmp_path: Path) -> None:
 def test_read_targets_missing_file_raises() -> None:
     with pytest.raises(FileNotFoundError):
         _read_targets(Path("does-not-exist-xyz.txt"), [])
+
+
+def _namespace(**kwargs: bool) -> object:
+    from argparse import Namespace
+
+    return Namespace(parse="", **kwargs)
+
+
+def test_apply_parse_enables_modules() -> None:
+    args = _namespace(subdomains=False, parse_social=False, ports=False, default_creds=False, cve_online=False)
+    args.parse = "subdomains,ports"
+    _apply_parse(args, None)  # type: ignore[arg-type]
+    assert args.subdomains is True
+    assert args.ports is True
+    assert args.parse_social is False
+
+
+def test_apply_parse_all_enables_everything() -> None:
+    args = _namespace(subdomains=False, parse_social=False, ports=False, default_creds=False, cve_online=False)
+    args.parse = "all"
+    _apply_parse(args, None)  # type: ignore[arg-type]
+    assert args.subdomains is True
+    assert args.parse_social is True
+    assert args.ports is True
+    assert args.default_creds is True
+    assert args.cve_online is True
