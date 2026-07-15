@@ -14,7 +14,7 @@ from stackscan.types import BruteTarget, CredFinding, ScanReport
 def _args(**overrides: Any) -> argparse.Namespace:
     ns = argparse.Namespace(
         full_auto=False,
-        json_output=True,
+        json_terminal=True,
         timeout=6.0,
         workers=40,
         cred_limit=50,
@@ -48,7 +48,7 @@ def test_brute_phase_skips_in_json_without_full_auto() -> None:
     report.brute_targets = [
         BruteTarget(host="cam.test", port=80, service="http (cam)", is_camera=True)
     ]
-    cli._run_brute_phase([report], _args(), Console())
+    cli._run_brute_phase([report], _args(), Console(), json_terminal=True)
     assert any(
         f.kind == "auth-required" and f.detail == "brute-force skipped" for f in report.creds
     )
@@ -58,7 +58,7 @@ def test_brute_phase_declined_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("builtins.input", lambda *_: "n")
     report = ScanReport(url="https://cam.test")
     report.brute_targets = [BruteTarget(host="cam.test", port=80, is_camera=True)]
-    cli._run_brute_phase([report], _args(json_output=False), Console())
+    cli._run_brute_phase([report], _args(json_terminal=False), Console(), json_terminal=False)
     assert all(f.kind != "default-creds" for f in report.creds)
     assert any(f.detail == "brute-force skipped" for f in report.creds)
 
@@ -82,5 +82,5 @@ def test_brute_phase_full_auto_runs_brute(monkeypatch: pytest.MonkeyPatch) -> No
         ]
 
     monkeypatch.setattr(cli, "brute_devices", fake_brute)
-    cli._run_brute_phase([report], _args(full_auto=True, json_output=False), Console())
+    cli._run_brute_phase([report], _args(full_auto=True, json_terminal=False), Console(), json_terminal=False)
     assert any(f.kind == "default-creds" and f.username == "admin" for f in report.creds)

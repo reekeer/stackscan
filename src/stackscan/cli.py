@@ -54,7 +54,6 @@ def _build_scan_parser() -> argparse.ArgumentParser:
     parser.add_argument("targets", nargs="*", help="Target URLs or hostnames.")
     parser.add_argument("-f", "--file", dest="file", type=Path, help="File with targets, one/line.")
     parser.add_argument("--sigdb", dest="sigdb", help="Explicit .sigdb path (overrides default).")
-    parser.add_argument("--no-sources", action="store_true", help="Ignore configured sources.")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="Request timeout.")
     parser.add_argument("--user-agent", dest="user_agent", default=DEFAULT_USER_AGENT)
     parser.add_argument("--insecure", action="store_true", help="Disable TLS verification.")
@@ -63,11 +62,13 @@ def _build_scan_parser() -> argparse.ArgumentParser:
         "--concurrency", type=int, default=DEFAULT_CONCURRENCY, help="Concurrent targets."
     )
     parser.add_argument("--geoip-db", dest="geoip_db", help="MaxMind .mmdb for IP geolocation.")
-    parser.add_argument("--no-dns", action="store_true", help="Skip DNS/IP resolution.")
-    parser.add_argument("--no-tls", action="store_true", help="Skip TLS certificate inspection.")
-    parser.add_argument("--no-geo", action="store_true", help="Skip IP geolocation.")
-    parser.add_argument("--no-probe", action="store_true", help="Skip passive exposure probes.")
-    parser.add_argument("--no-cve", action="store_true", help="Skip CVE correlation.")
+    parser.add_argument(
+        "--disable",
+        dest="disable",
+        default="",
+        metavar="LIST",
+        help='Skip passes by name, e.g. --disable "dns,tls,geo,probe,cve,ip-info,nmap".',
+    )
     parser.add_argument(
         "--parse-social",
         dest="parse_social",
@@ -79,7 +80,14 @@ def _build_scan_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also query NVD live for detected products (default is offline).",
     )
-    parser.add_argument("--no-builtin", action="store_true", help="Ignore the bundled sigdb.")
+    parser.add_argument(
+        "--cve-min-confidence",
+        dest="cve_min_confidence",
+        type=int,
+        default=50,
+        metavar="N",
+        help="Hide CVE matches with confidence below N (0-100, default 50).",
+    )
     parser.add_argument(
         "--full",
         action="store_true",
@@ -96,11 +104,7 @@ def _build_scan_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Active port/service scan (nmap if installed, else a Python connect scan).",
     )
-    parser.add_argument(
-        "--no-nmap",
-        action="store_true",
-        help="Force the built-in Python port scan even when nmap is available.",
-    )
+
     parser.add_argument(
         "--port-timeout", dest="port_timeout", type=float, default=1.5, help="Per-port timeout."
     )
@@ -120,7 +124,7 @@ def _build_scan_parser() -> argparse.ArgumentParser:
         "--site-limit",
         dest="site_limit",
         type=int,
-        default=20,
+        default=50,
         help="Max derived sites to analyze from discovered open ports (0 = unlimited).",
     )
     parser.add_argument(
@@ -137,44 +141,27 @@ def _build_scan_parser() -> argparse.ArgumentParser:
         help="Max default-credential pairs to try per device (0 = full SecLists list).",
     )
     parser.add_argument(
-        "--no-ip-info", dest="no_ip_info", action="store_true", help="Skip ipwho.is."
-    )
-    parser.add_argument(
         "--workers",
         type=int,
         default=DEFAULT_WORKERS,
         help="Parallel workers for ports/subdomains/creds.",
     )
     parser.add_argument(
-        "--no",
-        dest="no_passes",
-        default="",
-        metavar="LIST",
-        help='Skip passes by name, e.g. --no "dns,tls,geo,probe,cve,ip-info".',
-    )
-    parser.add_argument(
         "--export",
         dest="export",
         default="",
         metavar="FMTS",
-        help="Write report file(s): comma-separated json,xml,html.",
+        help="Export report: html, xml, json-f (file), json-t (terminal). Comma-separated.",
     )
     parser.add_argument(
         "--output",
         dest="output",
         default="stackscan-report",
-        help="Base name/path for --export files (default: stackscan-report).",
+        help="Base name/path for file exports (default: stackscan-report).",
     )
-    parser.add_argument("--json", dest="json_output", action="store_true", help="JSON output.")
-    parser.add_argument(
-        "--json-graph",
-        dest="json_graph",
-        action="store_true",
-        help="Include a nodes/edges graph in JSON output.",
-    )
+    parser.add_argument("--graph", dest="graph", action="store_true", help="Include graph in JSON output.")
     parser.add_argument("--show-empty", action="store_true", help="Show targets with no findings.")
     parser.add_argument("--compact", action="store_true", help="Compact one-row-per-target table.")
-    parser.add_argument("--no-banner", action="store_true", help="Do not print the banner.")
     parser.add_argument(
         "-v",
         "--verbose",
@@ -210,11 +197,14 @@ def _extract_verbose(argv: list[str]) -> tuple[int, list[str]]:
     return level, rest
 
 
-_NO_MAP: dict[str, str] = {
+_DISABLE_MAP: dict[str, str] = {
     "dns": "no_dns",
     "tls": "no_tls",
     "geo": "no_geo",
     "probe": "no_probe",
+    "404-probe": "no_404_probe",
+    "endpoints": "no_404_probe",
+    "endpoint": "no_404_probe",
     "cve": "no_cve",
     "ip-info": "no_ip_info",
     "ipinfo": "no_ip_info",
@@ -234,14 +224,20 @@ _NO_MAP: dict[str, str] = {
 }
 
 
-def _apply_no(args: argparse.Namespace, console: Console) -> None:
-    for token in args.no_passes.replace(" ", ",").split(","):
+def _apply_disable(args: argparse.Namespace, console: Console) -> None:
+    for attr in set(_DISABLE_MAP.values()):
+        if not hasattr(args, attr):
+            setattr(args, attr, False)
+    for token in args.disable.replace(" ", ",").split(","):
         token = token.strip().lower().lstrip("-")
         if not token:
             continue
-        attr = _NO_MAP.get(token)
+        attr = _DISABLE_MAP.get(token)
         if attr is None:
-            _warn(console, f"unknown --no pass: {token} (known: {', '.join(sorted(_NO_MAP))})")
+            _warn(
+                console,
+                f"unknown --disable feature: {token} (known: {', '.join(sorted(_DISABLE_MAP))})",
+            )
             continue
         setattr(args, attr, True)
 
@@ -333,8 +329,10 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         tls=not args.no_tls,
         geo=not args.no_geo,
         probe=not args.no_probe,
+        probe_404=not args.no_404_probe,
         cve=not args.no_cve,
         cve_online=args.cve_online and (not getattr(args, "no_cve_online", False)),
+        cve_min_confidence=max(0, min(100, args.cve_min_confidence)),
         parse_social=args.parse_social,
         ports=(args.ports or full) and (not getattr(args, "no_ports", False)),
         subdomains=(args.subdomains or full) and (not getattr(args, "no_subdomains", False)),
@@ -436,10 +434,16 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
 
         return report
 
+    def is_json_terminal() -> bool:
+        for token in args.export.replace(" ", ",").split(","):
+            if token.strip().lower() == "json-t":
+                return True
+        return False
+
     _stage_count = 7
     semaphore = asyncio.Semaphore(max(args.concurrency, 1))
     async with StackscanSession() as session:
-        if not args.json_output:
+        if not is_json_terminal():
             transient = args.verbose < 2
             with Progress(
                 SpinnerColumn(),
@@ -560,7 +564,7 @@ def _render_json(reports: list[ScanReport], elapsed: float, include_graph: bool 
 
 
 _EXPORTERS: dict[str, tuple[str, str]] = {
-    "json": ("json", "to_json"),
+    "json-f": ("json", "to_json"),
     "xml": ("xml", "to_xml"),
     "html": ("html", "to_html"),
 }
@@ -582,12 +586,12 @@ def _write_exports(
         if not fmt:
             continue
         if fmt not in _EXPORTERS:
-            _warn(console, f"unknown --export format: {fmt} (known: json, xml, html)")
+            _warn(console, f"unknown --export format: {fmt} (known: json-f, json-t, xml, html)")
             continue
         requested.append(fmt)
     for fmt in dict.fromkeys(requested):
         ext, func = _EXPORTERS[fmt]
-        payload = _payload(reports, elapsed, include_graph=(include_graph and fmt == "json"))
+        payload = _payload(reports, elapsed, include_graph=(include_graph and fmt == "json-f"))
         text: str = getattr(export, func)(payload)
         out = Path(f"{output}.{ext}")
         out.write_text(text, encoding="utf-8")
@@ -702,7 +706,9 @@ def _sort_creds(pairs: list[tuple[ScanReport, BruteTarget]]) -> None:
         )
 
 
-def _run_brute_phase(reports: list[ScanReport], args: argparse.Namespace, console: Console) -> None:
+def _run_brute_phase(
+    reports: list[ScanReport], args: argparse.Namespace, console: Console, *, json_terminal: bool
+) -> None:
     pairs = [(report, target) for report in reports for target in report.brute_targets]
     if not pairs:
         return
@@ -710,7 +716,7 @@ def _run_brute_phase(reports: list[ScanReport], args: argparse.Namespace, consol
     devices = len(pairs) - cameras
     if args.full_auto:
         accept = True
-    elif args.json_output:
+    elif json_terminal:
         accept = False
     else:
         accept = _prompt_brute(cameras, devices, console)
@@ -738,10 +744,10 @@ def _scan_command(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     args.verbose = verbose_level
     err_console = Console(stderr=True)
-    _apply_no(args, err_console)
-    if not args.no_banner:
+    _apply_disable(args, err_console)
+    if not getattr(args, "no_banner", False):
         render_banner(err_console)
-    if (args.ports or args.full) and (not args.no_nmap) and (not nmap_available()):
+    if (args.ports or args.full) and (not getattr(args, "no_nmap", False)) and (not nmap_available()):
         _warn(err_console, "nmap not found — using the built-in Python connect scan.")
     if args.default_creds or args.full or args.full_auto:
         _warn(
@@ -763,14 +769,25 @@ def _scan_command(argv: list[str]) -> int:
     if not reports:
         _warn(err_console, "No targets provided.")
         return 2
-    _run_brute_phase(reports, args, err_console)
+
+    def _export_formats() -> list[str]:
+        formats: list[str] = []
+        for token in args.export.replace(" ", ",").split(","):
+            fmt = token.strip().lower()
+            if fmt and fmt not in formats:
+                formats.append(fmt)
+        return formats
+
+    json_terminal = "json-t" in _export_formats()
+    _run_brute_phase(reports, args, err_console, json_terminal=json_terminal)
     elapsed = time.perf_counter() - started
-    if args.export:
+    file_formats = [fmt for fmt in _export_formats() if fmt != "json-t"]
+    if file_formats:
         _write_exports(
-            reports, elapsed, args.export, args.output, err_console, include_graph=args.json_graph
+            reports, elapsed, ",".join(file_formats), args.output, err_console, include_graph=args.graph
         )
-    if args.json_output:
-        _render_json(reports, elapsed, include_graph=args.json_graph)
+    if json_terminal:
+        _render_json(reports, elapsed, include_graph=args.graph)
     elif args.compact:
         _render_table(reports, args.show_empty)
         err_console.print(_scan_summary(reports, elapsed))
