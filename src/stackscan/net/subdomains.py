@@ -242,7 +242,7 @@ async def _wildcard_ips(apex: str, timeout: float, workers: int) -> set[str]:
     return ips
 
 
-_RECURSIVE_PREFIXES: tuple[str, ...] = (
+RECURSIVE_PREFIXES: tuple[str, ...] = (
     "www",
     "mail",
     "mx",
@@ -358,7 +358,7 @@ async def enumerate_subdomains(
             bases.update(_parent_zones(name, apex))
         rec: dict[str, str] = {}
         for base in bases:
-            for prefix in _RECURSIVE_PREFIXES:
+            for prefix in RECURSIVE_PREFIXES:
                 cand = f"{prefix}.{base}"
                 if cand not in discovered and cand not in candidates:
                     rec.setdefault(cand, "recursive")

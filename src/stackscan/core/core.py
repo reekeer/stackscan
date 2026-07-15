@@ -26,14 +26,24 @@ class StackscanSession:
             self._session = None
 
     async def fetch(
-        self, url: str, *, timeout: float, user_agent: str, insecure: bool, max_bytes: int
+        self,
+        url: str,
+        *,
+        timeout: float,
+        user_agent: str,
+        insecure: bool,
+        max_bytes: int,
+        headers: dict[str, str] | None = None,
     ) -> FetchResult:
         session = self._session
         if session is None:
             raise RuntimeError("StackscanSession is not entered")
+        request_headers: dict[str, str] = {"User-Agent": user_agent}
+        if headers:
+            request_headers.update(headers)
         async with session.get(
             url,
-            headers={"User-Agent": user_agent},
+            headers=request_headers,
             ssl=False if insecure else True,
             timeout=ClientTimeout(total=timeout),
         ) as resp:

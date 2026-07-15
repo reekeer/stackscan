@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urljoin
 
 from stackscan.analyzers import (
     ExposureProbe,
@@ -31,6 +33,7 @@ from stackscan.net import (
     resolve_host,
     scan_ports,
 )
+from stackscan.net.subdomains import RECURSIVE_PREFIXES, hostnames_in_records, load_bundled_wordlist
 from stackscan.types import (
     BruteTarget,
     CredFinding,
@@ -42,6 +45,8 @@ from stackscan.types import (
     ScanReport,
     SiteFinding,
     Software,
+    Subdomain,
+    Technology,
     TlsInfo,
 )
 from stackscan.utils import host_of, is_https, port_of
@@ -116,8 +121,10 @@ class ScanOptions:
     tls: bool = True
     geo: bool = True
     probe: bool = True
+    probe_404: bool = True
     cve: bool = True
     cve_online: bool = False
+    cve_min_confidence: int = 0
     parse_social: bool = False
     ports: bool = False
     subdomains: bool = False
@@ -173,6 +180,55 @@ async def _resolve_network(host: str, options: ScanOptions, geo: GeoProvider) ->
     )
 
 
+async def _probe_404(
+    session: StackscanSession, base_url: str, options: ScanOptions
+) -> FetchResult | None:
+    path = f"stackscan-{secrets.token_urlsafe(8).lower()}"
+    probe_url = urljoin(base_url.rstrip("/") + "/", path)
+    try:
+        return await session.fetch(
+            probe_url,
+            timeout=min(options.timeout, 4.0),
+            user_agent=options.user_agent,
+            insecure=options.insecure,
+            max_bytes=options.max_bytes,
+        )
+    except Exception:
+        return None
+
+
+def _merge_technologies(primary: list[Technology], extra: list[Technology]) -> list[Technology]:
+    by_name: dict[str, Technology] = {tech.name.lower(): tech for tech in primary}
+    for tech in extra:
+        key = tech.name.lower()
+        existing = by_name.get(key)
+        if existing is None:
+            by_name[key] = tech
+        else:
+            combined_evidence = tuple(dict.fromkeys((*existing.evidence, *tech.evidence)))
+            by_name[key] = Technology(
+                name=existing.name,
+                categories=existing.categories or tech.categories,
+                evidence=combined_evidence,
+                location=existing.location or tech.location,
+                confidence=max(existing.confidence, tech.confidence),
+                version=existing.version or tech.version,
+            )
+    return sorted(by_name.values(), key=lambda t: t.name.lower())
+
+
+def _merge_software(primary: list[Software], extra: list[Software]) -> list[Software]:
+    seen: set[tuple[str, str | None]] = {(s.name.lower(), s.version) for s in primary}
+    merged = list(primary)
+    for item in extra:
+        key = (item.name.lower(), item.version)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return merged
+
+
 async def _scan_site(
     url: str,
     session: StackscanSession,
@@ -199,12 +255,24 @@ async def _scan_site(
             )
         except Exception:
             tls = None
+
+    technologies = analyzer.detect(fetched)
+    software = extract_software(fetched.headers, fetched.body, location=host_of(fetched.url))
+    if options.probe_404:
+        not_found = await _probe_404(session, fetched.url, options)
+        if not_found is not None:
+            technologies = _merge_technologies(technologies, analyzer.detect(not_found))
+            software = _merge_software(
+                software,
+                extract_software(not_found.headers, not_found.body, location=host_of(not_found.url)),
+            )
+
     return SiteFinding(
         url=url,
         final_url=fetched.url,
         status=fetched.status,
-        technologies=analyzer.detect(fetched),
-        software=extract_software(fetched.headers, fetched.body, location=host_of(fetched.url)),
+        technologies=technologies,
+        software=software,
         infra=analyze_infra(fetched.headers, tuple(fetched.cookies), host),
         security=analyze_security_headers(fetched.headers),
         exposure=await analyze_exposure(session, fetched.url, probe) if options.probe else None,
@@ -253,6 +321,185 @@ def _collect_site_candidates(report: ScanReport, limit: int) -> list[str]:
         add(f"http://{sub.name}")
 
     return candidates[:limit]
+
+
+_VHOST_BASELINE_TIMEOUT = 4.0
+_VHOST_PROBE_TIMEOUT = 3.0
+_VHOST_MAX_CANDIDATES = 700
+
+
+def _vhost_candidate_names(report: ScanReport, limit: int, body: str = "") -> list[str]:
+    apex = report.network.host if report.network else host_of(report.url)
+    if not apex:
+        return []
+    seen: set[str] = set()
+    names: list[str] = []
+
+    def add(name: str) -> None:
+        if name and name not in seen and name.endswith("." + apex):
+            seen.add(name)
+            names.append(name)
+
+    for sub in report.subdomains:
+        add(sub.name)
+        for zone in _parent_zhosts(sub.name, apex):
+            add(zone)
+    for host in _subdomains_from_content(report, body):
+        add(host)
+    for label in load_bundled_wordlist():
+        add(f"{label}.{apex}")
+    for prefix in RECURSIVE_PREFIXES:
+        for base in (apex, *(sub.name for sub in report.subdomains)):
+            if base == apex:
+                add(f"{prefix}.{apex}")
+            else:
+                add(f"{prefix}.{base}")
+    return names[:limit]
+
+
+def _parent_zhosts(name: str, apex: str) -> list[str]:
+    labels = name.split(".")
+    apex_len = len(apex.split("."))
+    out: list[str] = []
+    while len(labels) > apex_len + 1:
+        labels = labels[1:]
+        out.append(".".join(labels))
+    return out
+
+
+async def _probe_vhost(
+    session: StackscanSession,
+    ip: str,
+    port: int,
+    tls: bool,
+    name: str,
+    user_agent: str,
+    timeout: float,
+    max_bytes: int,
+    baseline_status: int | None,
+) -> tuple[str, int | None, str]:
+    try:
+        result = await session.fetch(
+            _http_url(ip, port, tls),
+            timeout=timeout,
+            user_agent=user_agent,
+            insecure=True,
+            max_bytes=max_bytes,
+            headers={"Host": name},
+        )
+    except Exception:
+        return (name, None, "")
+    body = result.body.lower()
+    location = result.headers.get("location", "")
+    return (name, result.status, location + body[:512])
+
+
+async def _vhost_baselines(
+    session: StackscanSession,
+    targets: list[tuple[str, int, bool]],
+    user_agent: str,
+    timeout: float,
+    max_bytes: int,
+) -> dict[tuple[str, int, bool], tuple[int | None, str]]:
+    semaphore = asyncio.Semaphore(10)
+
+    async def one(target: tuple[str, int, bool]) -> tuple[tuple[str, int, bool], tuple[int | None, str]]:
+        ip, port, tls = target
+        async with semaphore:
+            try:
+                result = await session.fetch(
+                    _http_url(ip, port, tls),
+                    timeout=timeout,
+                    user_agent=user_agent,
+                    insecure=True,
+                    max_bytes=max_bytes,
+                )
+            except Exception:
+                return (target, (None, ""))
+            return (target, (result.status, result.body.lower()[:512]))
+
+    results = await asyncio.gather(*(one(t) for t in targets))
+    return dict(results)
+
+
+def _subdomains_from_content(report: ScanReport, body: str) -> set[str]:
+    apex = report.network.host if report.network else host_of(report.url)
+    if not apex:
+        return set()
+    return hostnames_in_records((body,), apex)
+
+
+async def discover_vhosts(
+    report: ScanReport,
+    session: StackscanSession,
+    options: ScanOptions,
+    body: str = "",
+) -> list[Subdomain]:
+    if not options.full or not options.discover_sites:
+        return []
+    ips = _collect_ips(report)
+    if not ips:
+        return []
+    port_scan = report.ports
+    targets: list[tuple[str, int, bool]] = []
+    if port_scan is not None:
+        for port in port_scan.ports:
+            if port.port not in (80, 443):
+                continue
+            for ip in ips:
+                targets.append((ip, port.port, port.port == 443))
+    if not targets:
+        return []
+    targets = list(dict.fromkeys(targets))
+    names = _vhost_candidate_names(report, _VHOST_MAX_CANDIDATES, body)
+    if not names:
+        return []
+    baselines = await _vhost_baselines(
+        session,
+        targets,
+        options.user_agent,
+        _VHOST_BASELINE_TIMEOUT,
+        options.max_bytes,
+    )
+    semaphore = asyncio.Semaphore(max(options.workers, 50))
+
+    async def one(
+        target: tuple[str, int, bool], name: str
+    ) -> tuple[str, tuple[str, ...]] | None:
+        ip, port, tls = target
+        baseline = baselines.get(target)
+        if baseline is None or baseline[0] is None:
+            return None
+        async with semaphore:
+            vname, status, indicator = await _probe_vhost(
+                session,
+                ip,
+                port,
+                tls,
+                name,
+                options.user_agent,
+                _VHOST_PROBE_TIMEOUT,
+                options.max_bytes,
+                baseline[0],
+            )
+        if status is None:
+            return None
+        if status != baseline[0] or vname.lower() in indicator or vname.replace(".", "-") in indicator:
+            return (vname, (ip,))
+        return None
+
+    tasks = [one(t, name) for t in targets for name in names]
+    found = await asyncio.gather(*tasks)
+    discovered: dict[str, Subdomain] = {}
+    existing_names = {sub.name for sub in report.subdomains}
+    for item in found:
+        if item is None:
+            continue
+        name, addrs = item
+        if name in existing_names or name in discovered:
+            continue
+        discovered[name] = Subdomain(name=name, addresses=addrs, source="vhost")
+    return sorted(discovered.values(), key=lambda sub: sub.name)
 
 
 async def _scan_derived_sites(
@@ -455,11 +702,14 @@ async def scan_target(
                 bits.append("probing exposure")
             stage(" · ".join(bits))
         san = report.tls.subject_alt_names if report.tls else ()
+        content_hosts: set[str] = (
+            hostnames_in_records((fetched.body,), host) if fetched and host else set()
+        )
         sub_coro = (
             enumerate_subdomains(
                 host,
                 san_names=san,
-                dns_hosts=_dns_record_hosts(report.network),
+                dns_hosts=(*_dns_record_hosts(report.network), *content_hosts),
                 timeout=options.port_timeout,
                 workers=options.workers,
                 limit=options.subdomain_limit,
@@ -498,6 +748,12 @@ async def scan_target(
 
         if options.discover_sites:
             stage("probing derived sites")
+            vhosts = await discover_vhosts(
+                report, session, options, body=fetched.body if fetched else ""
+            )
+            if vhosts:
+                report.subdomains.extend(vhosts)
+                report.subdomains.sort(key=lambda sub: sub.name)
             report.site_findings = await _scan_derived_sites(
                 _collect_site_candidates(report, options.site_limit),
                 session,
@@ -513,12 +769,16 @@ async def scan_target(
                 location=host_of(fetched.url) if fetched else host,
             )
             report.software.extend(software_from_ports(report.ports))
-            report.cves = match_cves(_all_software(report))
+            report.cves = match_cves(
+                _all_software(report), min_confidence=max(0, options.cve_min_confidence)
+            )
 
         if options.ip_info or options.default_creds or (options.cve and options.cve_online):
             stage("IP intelligence · default-cred checks")
         online_coro = (
-            match_cves_online(_all_software(report))
+            match_cves_online(
+                _all_software(report), min_confidence=max(0, options.cve_min_confidence)
+            )
             if options.cve and options.cve_online
             else _aval([])
         )
