@@ -115,7 +115,7 @@ def test_match_cves_marks_nmap_ssh_banner_unconfirmed() -> None:
     cves = match_cves(software)
     assert cves
     assert all(c.unconfirmed for c in cves)
-    assert all(c.confidence == 40 for c in cves)
+    assert all(c.confidence <= 60 for c in cves)
 
 
 def test_distro_tag_detects_backport_suffixes() -> None:
@@ -137,7 +137,7 @@ def test_match_cves_marks_ubuntu_banner_unconfirmed() -> None:
     cves = match_cves(software)
     assert cves
     assert all(c.unconfirmed for c in cves)
-    assert all(c.confidence == 40 for c in cves)
+    assert all(c.confidence <= 60 for c in cves)
     assert not any(c.severity == "CRITICAL" and not c.unconfirmed for c in cves)
 
 
@@ -154,7 +154,36 @@ def test_match_cves_marks_centos_banner_unconfirmed() -> None:
     cves = match_cves(software)
     assert cves
     assert all(c.unconfirmed for c in cves)
-    assert all(c.confidence == 40 for c in cves)
+    assert all(c.confidence <= 60 for c in cves)
+
+
+def test_match_cves_respects_min_confidence() -> None:
+    software = extract_software({"server": "nginx/1.18.0"}, "")
+    all_cves = match_cves(software)
+    assert all_cves
+    high_confidence = match_cves(software, min_confidence=95)
+    assert len(high_confidence) < len(all_cves)
+    assert all(c.confidence >= 95 for c in high_confidence)
+
+
+def test_extract_software_from_core_commit_body() -> None:
+    software = extract_software({}, "CurseForge Core (a26fded)")
+    curse = next(s for s in software if s.name == "curseforge")
+    assert curse.version == "a26fded"
+    assert curse.source == "body:core-commit"
+
+
+def test_extract_generic_software_from_404_body() -> None:
+    body = "<html><body><hr><center>nginx/1.18.0</center></body></html>"
+    software = extract_software({"server": "cloudflare"}, body)
+    nginx = next(s for s in software if s.name == "nginx")
+    assert nginx.version == "1.18.0"
+    assert nginx.source.startswith("body:")
+
+
+def test_commit_hash_does_not_match_cve_ranges() -> None:
+    software = extract_software({}, "CurseForge Core (a26fded)")
+    assert not match_cves(software)
 
 
 def test_distro_tag_detects_various_backport_distros() -> None:
@@ -196,5 +225,5 @@ def test_software_from_ports_flags_distro_backports_for_any_service() -> None:
         if cves:
             assert all(c.unconfirmed for c in cves), f"CVEs for {product} {version} should be unconfirmed"
             assert all(
-                c.confidence == 40 for c in cves
-            ), f"CVE confidence for {product} {version} should be capped at 40"
+                c.confidence <= 60 for c in cves
+            ), f"CVE confidence for {product} {version} should be capped at 60"

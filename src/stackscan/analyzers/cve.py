@@ -9,6 +9,7 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any, cast
 
+from stackscan.analyzers.generic import extract_generic_software, is_commit_hash
 from stackscan.types import CveMatch, Headers, PortScan, Software
 
 CveEntry = dict[str, Any]
@@ -100,6 +101,9 @@ _GENERATOR_RE = re.compile(
     "<meta[^>]+name=[\\\"']generator[\\\"'][^>]+content=[\\\"']([^\\\"']+)[\\\"']", re.IGNORECASE
 )
 _SSH_RE = re.compile(r"openssh[\s_/:-](\d+\.\d+(?:p\d+)?)", re.IGNORECASE)
+_CORE_COMMIT_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9\s-]*?)\s+Core\s+\(([a-f0-9]{4,})\)", re.IGNORECASE
+)
 
 
 @lru_cache(maxsize=1)
@@ -199,6 +203,22 @@ def extract_software(headers: Headers, body: str, location: str = "") -> list[So
                     location=location,
                 )
             )
+    core_match = _CORE_COMMIT_RE.search(body)
+    if core_match:
+        product = core_match.group(1).strip()
+        commit = core_match.group(2).lower()
+        if product:
+            add(
+                Software(
+                    name=product.lower().replace(" ", ""),
+                    version=commit,
+                    source="body:core-commit",
+                    location=location,
+                )
+            )
+
+    for item in extract_generic_software(body, location=location):
+        add(item)
     return software
 
 
@@ -241,7 +261,13 @@ _AUTHORITATIVE = {"header:server", "header:x-powered-by", "port-banner"}
 _SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
 
 
-def _confidence(version: str, rng: dict[str, str], source: str) -> int:
+def _confidence(version: str, rng: dict[str, str], source: str, backported: bool = False) -> int:
+    if backported:
+        # A range that pins the vulnerable window (has a start bound) is more
+        # useful than a vague "before X" range for distro backports.
+        if "start_incl" in rng or "start_excl" in rng:
+            return 60
+        return 30
     comps = len([c for c in re.split("[.\\-_]", version) if c[:1].isdigit()])
     bounded = ("start_incl" in rng or "start_excl" in rng) and (
         "end_incl" in rng or "end_excl" in rng
@@ -279,6 +305,8 @@ def _match_entries(
     version = item.version
     if not version:
         return
+    if is_commit_hash(version):
+        return
     backported = bool(item.os)
     caveat = "distro backport likely — patchlevel not in banner" if backported else ""
     for entry in entries:
@@ -287,7 +315,7 @@ def _match_entries(
         if hit_rng is None:
             continue
         cve_id = str(entry["id"])
-        confidence = 40 if backported else _confidence(version, hit_rng, item.source)
+        confidence = _confidence(version, hit_rng, item.source, backported=backported)
         record = agg.get(cve_id)
         if record is None:
             record = _CveAgg(
@@ -310,7 +338,8 @@ def _match_entries(
         if backported:
             record.unconfirmed = True
             record.caveat = caveat
-            record.confidence = min(record.confidence, 40)
+            if confidence < record.confidence:
+                record.confidence = confidence
         elif confidence > record.confidence:
             record.confidence = confidence
             record.version = version
@@ -364,7 +393,7 @@ def merge_cve_matches(offline: list[CveMatch], online: list[CveMatch]) -> list[C
     return _sort_matches(list(by_id.values()))
 
 
-def match_cves(software: list[Software]) -> list[CveMatch]:
+def match_cves(software: list[Software], *, min_confidence: int = 0) -> list[CveMatch]:
     db = load_cve_db()
     agg: dict[str, _CveAgg] = {}
     for item in software:
@@ -374,7 +403,10 @@ def match_cves(software: list[Software]) -> list[CveMatch]:
         entries = db.get(product_key)
         if entries:
             _match_entries(item, product_key, entries, agg)
-    return _agg_to_matches(agg)
+    matches = _agg_to_matches(agg)
+    if min_confidence > 0:
+        matches = [m for m in matches if m.confidence >= min_confidence]
+    return matches
 
 
 _NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
@@ -451,7 +483,7 @@ def _nvd_summary(descriptions: list[dict[str, str]]) -> str:
 
 
 async def match_cves_online(
-    software: list[Software], *, timeout: float = 25.0, workers: int = 3
+    software: list[Software], *, timeout: float = 25.0, workers: int = 3, min_confidence: int = 0
 ) -> list[CveMatch]:
     import aiohttp
 
@@ -488,4 +520,7 @@ async def match_cves_online(
     for (product_key, item), entries in zip(products.items(), gathered, strict=True):
         if entries:
             _match_entries(item, product_key, entries, agg)
-    return _agg_to_matches(agg)
+    matches = _agg_to_matches(agg)
+    if min_confidence > 0:
+        matches = [m for m in matches if m.confidence >= min_confidence]
+    return matches
