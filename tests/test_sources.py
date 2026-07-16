@@ -20,12 +20,24 @@ def _rules_file(tmp_path: Path) -> str:
     return path.as_uri()
 
 
-def test_add_http_rules_source_compiles_sigdb(tmp_path: Path) -> None:
+def test_add_web_rules_source_compiles_sigdb(tmp_path: Path) -> None:
     store = SourceStore()
     source = store.add(_rules_file(tmp_path))
-    assert source.kind == "http"
+    assert source.kind == "web"
     assert Path(source.path).is_file()
     assert Path(source.path).read_bytes()[:4] == b"SIGT"
+
+
+def test_add_path_source_uses_local_sigdb(tmp_path: Path) -> None:
+    from sigdb.core import build_sigdb
+
+    sig = tmp_path / "local.sigdb"
+    build_sigdb(rules={"x": {"headers": {"server": "nginx", "_name": "X"}}}, output_path=sig)
+    store = SourceStore()
+    source = store.add(str(sig))
+    assert source.kind == "path"
+    assert Path(source.path) == sig.resolve()
+    assert store.resolve_paths() == [sig.resolve()]
 
 
 def test_list_and_resolve_paths(tmp_path: Path) -> None:
@@ -33,6 +45,17 @@ def test_list_and_resolve_paths(tmp_path: Path) -> None:
     store.add(_rules_file(tmp_path))
     assert len(store.list()) == 1
     assert len(store.resolve_paths()) == 1
+
+
+def test_disable_and_enable_source(tmp_path: Path) -> None:
+    store = SourceStore()
+    source = store.add(_rules_file(tmp_path))
+    assert store.set_enabled(source.id, False) is True
+    assert store.list()[0].enabled is False
+    assert store.resolve_paths() == []
+    assert store.set_enabled(source.id, True) is True
+    assert len(store.resolve_paths()) == 1
+    assert store.set_enabled("nonexistent", False) is False
 
 
 def test_remove_source(tmp_path: Path) -> None:

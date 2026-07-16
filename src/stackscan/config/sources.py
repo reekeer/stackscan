@@ -6,9 +6,10 @@ import os
 import subprocess
 import time
 import urllib.request
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urljoin
 
 SIGDB_MAGIC = b"SIGT"
 _RULES_FILENAMES = ("sigdb.json", "rules.json", "signatures.json")
@@ -29,6 +30,7 @@ class Source:
     kind: str
     path: str
     added: int
+    enabled: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -70,6 +72,16 @@ def _normalize_git_url(url: str) -> str:
     return url[4:] if url.startswith("git+") else url
 
 
+def _detect_kind(url: str) -> str:
+    if _looks_like_git(url):
+        return "git"
+    if url.startswith(("http://", "https://")):
+        return "web"
+    if Path(url).expanduser().is_file():
+        return "path"
+    return "web"
+
+
 class SourceStore:
     def __init__(self) -> None:
         self._registry = registry_path()
@@ -91,13 +103,15 @@ class SourceStore:
         sources: list[Source] = []
         for row in self._load_raw():
             try:
+                kind = str(row["kind"])
                 sources.append(
                     Source(
                         id=str(row["id"]),
                         url=str(row["url"]),
-                        kind=str(row["kind"]),
+                        kind="web" if kind == "http" else kind,
                         path=str(row["path"]),
                         added=int(row["added"]),
+                        enabled=bool(row.get("enabled", True)),
                     )
                 )
             except (KeyError, ValueError, TypeError):
@@ -111,21 +125,31 @@ class SourceStore:
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
-    def add(self, url: str) -> Source:
+    def add(self, url: str, kind: str | None = None) -> Source:
         url = url.strip()
         if not url:
             raise SourceError("empty source url")
-        kind = "git" if _looks_like_git(url) else "http"
+        kind = kind or _detect_kind(url)
         source_id = _source_id(url)
         dest = self._cache / source_id
         dest.mkdir(parents=True, exist_ok=True)
         compiled = dest / "signatures.sigdb"
         if kind == "git":
             _materialize_git(url, dest, compiled)
+            path = compiled
+        elif kind == "path":
+            path = _materialize_path(url, compiled)
         else:
             _materialize_http(url, compiled)
+            path = compiled
+        previous = next((s for s in self.list() if s.id == source_id), None)
         source = Source(
-            id=source_id, url=url, kind=kind, path=str(compiled), added=int(time.time())
+            id=source_id,
+            url=url,
+            kind=kind,
+            path=str(path),
+            added=int(time.time()),
+            enabled=previous.enabled if previous else True,
         )
         sources = [s for s in self.list() if s.id != source_id]
         sources.append(source)
@@ -143,16 +167,29 @@ class SourceStore:
             _remove_tree(self._cache / source.id)
         return True
 
+    def set_enabled(self, key: str, enabled: bool) -> bool:
+        sources = self.list()
+        changed = False
+        for index, source in enumerate(sources):
+            if key in (source.id, source.url):
+                sources[index] = replace(source, enabled=enabled)
+                changed = True
+        if changed:
+            self._persist(sources)
+        return changed
+
     def update(self, key: str | None = None) -> list[Source]:
         targets = [s for s in self.list() if key in (None, s.id, s.url)]
         refreshed: list[Source] = []
         for source in targets:
-            refreshed.append(self.add(source.url))
+            refreshed.append(self.add(source.url, kind=source.kind))
         return refreshed
 
     def resolve_paths(self) -> list[Path]:
         paths: list[Path] = []
         for source in self.list():
+            if not source.enabled:
+                continue
             path = Path(source.path)
             if path.is_file():
                 paths.append(path)
@@ -193,12 +230,49 @@ def _compile_rules_bytes(raw: bytes, output: Path) -> None:
     build_sigdb(rules=cast("dict[str, Any]", rules), output_path=output)
 
 
+def _materialize_path(src: str, output: Path) -> Path:
+    source_file = Path(src).expanduser()
+    if not source_file.is_file():
+        raise SourceError(f"file not found: {source_file}")
+    raw = source_file.read_bytes()
+    if raw[:4] == SIGDB_MAGIC:
+        return source_file.resolve()
+    _compile_rules_bytes(raw, output)
+    return output
+
+
+def _manifest_sigdb_url(manifest_url: str, data: dict[str, Any]) -> str | None:
+    artifacts = data.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return None
+    sigdb = cast("dict[str, Any]", artifacts).get("sigdb")
+    if not isinstance(sigdb, dict):
+        return None
+    rel = cast("dict[str, Any]", sigdb).get("path")
+    if not rel:
+        return None
+    return urljoin(manifest_url, str(rel))
+
+
 def _materialize_http(url: str, output: Path) -> None:
     raw = _http_get(url)
     if raw[:4] == SIGDB_MAGIC:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(raw)
         return
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SourceError("source is neither a .sigdb file nor valid JSON") from exc
+    if isinstance(data, dict):
+        sigdb_url = _manifest_sigdb_url(url, cast("dict[str, Any]", data))
+        if sigdb_url:
+            sig_raw = _http_get(sigdb_url)
+            if sig_raw[:4] != SIGDB_MAGIC:
+                raise SourceError(f"{sigdb_url} is not a .sigdb file")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(sig_raw)
+            return
     _compile_rules_bytes(raw, output)
 
 

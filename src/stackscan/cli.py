@@ -924,11 +924,24 @@ def _sigdb_command(argv: list[str]) -> int:
         "-h", "--help", action=_HelpAction, nargs=0, help="Show this help message and exit."
     )
     sub = parser.add_subparsers(dest="action", required=True)
-    add_p = sub.add_parser("add", help="Add a signature source (http URL or git repo).")
-    add_p.add_argument("url", help="Source URL: .sigdb, rules JSON, or a git repository.")
+    add_p = sub.add_parser("add", help="Add a signature source (local path, web URL, or git repo).")
+    add_p.add_argument(
+        "url",
+        help="Source: local .sigdb/rules path, http(s) URL (.sigdb/manifest.json), or git repo.",
+    )
+    add_p.add_argument(
+        "--type",
+        dest="kind",
+        choices=["path", "web", "git"],
+        help="Force the source type instead of auto-detecting.",
+    )
     sub.add_parser("list", help="List configured sources.")
     remove_p = sub.add_parser("remove", help="Remove a source by id or url.")
     remove_p.add_argument("key", help="Source id or url.")
+    enable_p = sub.add_parser("enable", help="Enable a source by id or url.")
+    enable_p.add_argument("key", help="Source id or url.")
+    disable_p = sub.add_parser("disable", help="Disable a source without removing it.")
+    disable_p.add_argument("key", help="Source id or url.")
     update_p = sub.add_parser("update", help="Re-fetch and recompile a source (or all).")
     update_p.add_argument("key", nargs="?", help="Source id or url; omit to update all.")
     args = parser.parse_args(argv)
@@ -936,7 +949,7 @@ def _sigdb_command(argv: list[str]) -> int:
     console = Console()
     try:
         if args.action == "add":
-            source = store.add(args.url)
+            source = store.add(args.url, kind=args.kind)
             console.print(
                 f"[green]Added[/green] {args.url} ([cyan]{source.kind}[/cyan], id={source.id}) -> {source.path}"
             )
@@ -949,17 +962,30 @@ def _sigdb_command(argv: list[str]) -> int:
             table = Table(title="Signature Sources")
             table.add_column("ID", style="cyan")
             table.add_column("Kind")
+            table.add_column("State")
             table.add_column("URL", overflow="fold")
             table.add_column("Added")
             for source in sources:
                 added = datetime.fromtimestamp(source.added, UTC).strftime("%Y-%m-%d")
-                table.add_row(source.id, source.kind, source.url, added)
+                state = (
+                    f"[{theme.SUCCESS}]enabled[/]"
+                    if source.enabled
+                    else f"[{theme.MUTED}]disabled[/]"
+                )
+                table.add_row(source.id, source.kind, state, source.url, added)
             console.print(table)
             return 0
         if args.action == "remove":
             removed = store.remove(args.key)
             if removed:
                 console.print(f"[green]Removed[/green] {args.key}")
+                return 0
+            console.print(f"[yellow]No source matched[/yellow] {args.key}")
+            return 1
+        if args.action in ("enable", "disable"):
+            enabled = args.action == "enable"
+            if store.set_enabled(args.key, enabled):
+                console.print(f"[green]{args.action.title()}d[/green] {args.key}")
                 return 0
             console.print(f"[yellow]No source matched[/yellow] {args.key}")
             return 1
