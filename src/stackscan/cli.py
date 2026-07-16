@@ -7,6 +7,7 @@ import sys
 import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,11 @@ DEFAULT_MAX_BYTES = 1000000
 DEFAULT_CONCURRENCY = 10
 DEFAULT_WORKERS = 350
 DEFAULT_USER_AGENT = "stackscan/2.0 (+https://github.com/reekeer/stackscan)"
+
+
+@lru_cache(maxsize=1)
+def _glyphs() -> theme.Glyphs:
+    return theme.glyphs(Console(stderr=True))
 
 
 class _HelpAction(argparse.Action):
@@ -173,6 +179,12 @@ def _build_scan_parser() -> argparse.ArgumentParser:
     parser.add_argument("--show-empty", action="store_true", help="Show targets with no findings.")
     parser.add_argument("--compact", action="store_true", help="Compact one-row-per-target table.")
     parser.add_argument(
+        "--no-bell",
+        dest="no_bell",
+        action="store_true",
+        help="Do not ring the terminal bell when the scan finishes.",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         dest="verbose",
@@ -313,11 +325,16 @@ async def _expand_wildcards(raw_targets: list[str], workers: int) -> list[str]:
 
 
 class _StageTracker:
-    def __init__(self, progress_obj: Progress, task_id: Any, target: str) -> None:
+    def __init__(self, progress_obj: Progress, task_id: Any, target: str, total: int) -> None:
         self._progress = progress_obj
         self._task_id = task_id
         self._target = target
         self._index = 0
+        self._total = total
+        self._host = target.split("://", 1)[-1]
+
+    def _title(self, message: str) -> None:
+        _set_title(f"stackscan {self._index}/{self._total} · {self._host} · {message}")
 
     def stage(self, message: str) -> None:
         self._index += 1
@@ -326,12 +343,29 @@ class _StageTracker:
             advance=1,
             description=f"[~] {self._target} · {message}",
         )
+        self._title(message)
 
     def info(self, message: str) -> None:
         self._progress.update(
             self._task_id,
             description=f"[~] {self._target} · {message}",
         )
+        self._title(message)
+
+    def reserve(self, extra: int) -> None:
+        if extra <= 0:
+            return
+        self._total += extra
+        self._progress.update(self._task_id, total=self._total)
+
+    def advance(self, message: str, *, steps: int = 1) -> None:
+        self._index += steps
+        self._progress.update(
+            self._task_id,
+            advance=steps,
+            description=f"[~] {self._target} · {message}",
+        )
+        self._title(message)
 
 
 async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
@@ -416,7 +450,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
 
         stage_log: StageLog | None = None
         if staged and progress_obj is not None and task_id is not None:
-            stage_log = _StageTracker(progress_obj, task_id, target)
+            stage_log = _StageTracker(progress_obj, task_id, target, target_total)
             stage_log.info("starting...")
 
         report = await scan_target(
@@ -456,6 +490,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
                 highlight=False,
             )
 
+        _set_title(f"stackscan {completed}/{total_targets} · {target.split('://', 1)[-1]}")
         if progress_obj is not None and task_id is not None:
             if staged:
                 progress_obj.update(task_id, completed=target_total, description=f"[+] {target}")
@@ -471,6 +506,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         return False
 
     semaphore = asyncio.Semaphore(max(args.concurrency, 1))
+    _set_title(f"stackscan · scanning {total_targets} target(s)")
     async with StackscanSession() as session:
         if not is_json_terminal():
             transient = args.verbose < 2
@@ -515,7 +551,7 @@ def _infra_summary(report: ScanReport) -> str:
         info.org or info.isp for info in report.ip_info if info.is_cdn and (info.org or info.isp)
     ]
     parts: list[str] = []
-    edge = summarize_edge(infra, [org for org in cdn_orgs if org])
+    edge = summarize_edge(infra, [org for org in cdn_orgs if org], sep=f" {_glyphs().arrow} ")
     if edge:
         parts.append("behind " + edge)
     if infra.server:
@@ -659,16 +695,34 @@ def _scan_summary(reports: list[ScanReport], elapsed: float) -> str:
         parts.append(f"[bold]{sites}[/bold] site(s)")
     if exposed:
         parts.append(f"[bold {theme.DANGER}]{exposed} exposed device(s)[/]")
-    parts.append(f"done in [{theme.ACCENT}]{_fmt_elapsed(elapsed)}[/]")
-    return "  ·  ".join(parts)
+    parts.append(f"{_glyphs().done} done in [{theme.ACCENT}]{_fmt_elapsed(elapsed)}[/]")
+    return f"  {_glyphs().bullet}  ".join(parts)
 
 
 def _warn(console: Console, message: str) -> None:
-    console.print(f"[{theme.WARN}][!][/] {message}", highlight=False)
+    console.print(f"[{theme.WARN}]{_glyphs().warn}[/] {message}", highlight=False)
 
 
 def _error(console: Console, message: str) -> None:
-    console.print(f"[{theme.DANGER}][x][/] {message}", highlight=False)
+    console.print(f"[{theme.DANGER}]{_glyphs().err}[/] {message}", highlight=False)
+
+
+def _set_title(title: str) -> None:
+    try:
+        if sys.stderr.isatty():
+            sys.stderr.write(f"\x1b]0;{title}\x07")
+            sys.stderr.flush()
+    except Exception:
+        pass
+
+
+def _bell() -> None:
+    try:
+        if sys.stderr.isatty():
+            sys.stderr.write("\a")
+            sys.stderr.flush()
+    except Exception:
+        pass
 
 
 def _increase_nofile_limit() -> None:
@@ -832,6 +886,9 @@ def _scan_command(argv: list[str]) -> int:
     else:
         render_reports(reports, Console(), show_empty=args.show_empty)
         err_console.print(_scan_summary(reports, elapsed))
+    _set_title(f"stackscan · done ({len(reports)} target(s) in {_fmt_elapsed(elapsed)})")
+    if not args.no_bell:
+        _bell()
     return 0
 
 

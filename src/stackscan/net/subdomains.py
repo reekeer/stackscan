@@ -5,6 +5,7 @@ import re
 import secrets
 import socket
 import urllib.request
+from collections.abc import Callable
 from functools import lru_cache
 from importlib import resources
 from typing import Any, cast
@@ -451,13 +452,20 @@ async def enumerate_subdomains(
     limit: int = 5000,
     recursive: bool = True,
     passive: bool = True,
+    on_phase: Callable[[str], None] | None = None,
 ) -> list[Subdomain]:
     apex = apex_domain(host)
     if not apex:
         return []
+
+    def phase(message: str) -> None:
+        if on_phase is not None:
+            on_phase(message)
+
     discovered: dict[str, Subdomain] = {}
     dns_workers = min(max(workers * 10, 1000), 1500)
 
+    phase("zone transfer & certificate transparency")
     ct_coro = _cert_transparency(apex) if passive else _empty_set()
     axfr, wildcard, ct_names = await asyncio.gather(
         asyncio.to_thread(_zone_transfer, apex),
@@ -481,6 +489,7 @@ async def enumerate_subdomains(
     for ct_name in ct_names:
         candidates.setdefault(ct_name, "crt.sh")
     pending = [name for name in candidates if name not in discovered]
+    phase(f"resolving {len(pending)} candidate host(s)")
     await _resolve_into(discovered, candidates, pending, timeout, dns_workers, wildcard)
 
     for name, source in candidates.items():
@@ -501,6 +510,7 @@ async def enumerate_subdomains(
                 if cand not in discovered and cand not in candidates:
                     rec.setdefault(cand, "recursive")
         rec_pending = list(rec)[:_MAX_RECURSIVE]
+        phase(f"recursively resolving {len(rec_pending)} host(s)")
         await _resolve_into(discovered, rec, rec_pending, timeout, dns_workers, wildcard)
     return sorted(discovered.values(), key=lambda sub: sub.name)
 

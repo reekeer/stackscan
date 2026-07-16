@@ -156,6 +156,8 @@ def _http_protocols(fetched: FetchResult, tls: TlsInfo | None) -> list[str]:
 class StageLog(Protocol):
     def stage(self, message: str) -> None: ...
     def info(self, message: str) -> None: ...
+    def reserve(self, extra: int) -> None: ...
+    def advance(self, message: str, *, steps: int = 1) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -749,6 +751,8 @@ async def _scan_ports_on_ips(
                 prefer_nmap=options.prefer_nmap,
                 workers=max(options.workers // total, 20),
             )
+        if log is not None:
+            log.advance(f"scanned ports on {ip} ({index}/{total})")
         return (ip, scan)
 
     results = await asyncio.gather(*(one(ip, i + 1) for i, ip in enumerate(ips)))
@@ -929,6 +933,14 @@ async def scan_target(
         content_hosts: set[str] = (
             hostnames_in_records((fetched.body,), host) if fetched and host else set()
         )
+        sub_log = log
+
+        def _sub_phase(message: str) -> None:
+            if sub_log is not None:
+                sub_log.advance(message)
+
+        if options.subdomains and host and log is not None:
+            log.reserve(3)
         sub_coro = (
             enumerate_subdomains(
                 host,
@@ -938,6 +950,7 @@ async def scan_target(
                 workers=options.workers,
                 limit=options.subdomain_limit,
                 passive=options.ct_logs,
+                on_phase=_sub_phase,
             )
             if options.subdomains and host
             else _aval([])
@@ -980,7 +993,10 @@ async def scan_target(
                 info(f"skipping {len(cdn_ips)} CDN/proxy IP(s)")
 
         if options.smart_scan:
-            stage(f"scanning ports on {len(ips - cdn_ips)} host(s)")
+            live_hosts = ips - cdn_ips
+            stage(f"scanning ports on {len(live_hosts)} host(s)")
+            if log is not None:
+                log.reserve(len(live_hosts))
             report.ports, _ = await _scan_ports_on_ips(ips, options, cdn_ips=cdn_ips, log=log)
         elif options.ports and host:
             stage("scanning ports")
