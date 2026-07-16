@@ -13,6 +13,7 @@ from stackscan.analyzers.security import analyze_security_headers
 from stackscan.analyzers.services import classify_services, port_category
 from stackscan.analyzers.social import parse_social
 from stackscan.analyzers.tech import TechAnalyzer
+from stackscan.analyzers.webdetect import detect_web_services
 
 __all__ = [
     "ExposureProbe",
@@ -23,6 +24,7 @@ __all__ = [
     "analyze_security_headers",
     "brute_devices",
     "detect_devices",
+    "detect_web_services",
     "detect_os",
     "classify_services",
     "port_category",

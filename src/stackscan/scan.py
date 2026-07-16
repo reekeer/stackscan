@@ -16,6 +16,7 @@ from stackscan.analyzers import (
     classify_services,
     detect_devices,
     detect_os,
+    detect_web_services,
     extract_software,
     match_cves,
     match_cves_online,
@@ -378,6 +379,7 @@ async def _scan_site(
     site_host = host_of(fetched.url)
     technologies = analyzer.detect(fetched)
     technologies.extend(detect_vibe_code(fetched.body))
+    technologies.extend(detect_web_services(fetched.headers, fetched.body, site_host))
     software = extract_software(fetched.headers, fetched.body, location=site_host)
     if options.probe_404:
         not_found = await _probe_404(session, fetched.url, options)
@@ -962,6 +964,9 @@ async def scan_target(
             report.status = fetched.status
             report.technologies = matchers_analyzer.detect(fetched)
             report.technologies.extend(detect_vibe_code(fetched.body))
+            report.technologies.extend(
+                detect_web_services(fetched.headers, fetched.body, host_of(fetched.url))
+            )
             stage("fingerprinting edge, headers & protocols")
             report.infra = analyze_infra(fetched.headers, tuple(fetched.cookies), host)
             report.technologies = _merge_technologies(

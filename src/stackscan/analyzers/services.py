@@ -163,6 +163,15 @@ def _service_from_tech(tech: Technology) -> ServiceFinding | None:
             evidence=" ".join(tech.evidence) or f"tech: {tech.name}",
             severity=_SEVERITY["database"],
         )
+    categories = {category.lower() for category in tech.categories}
+    for kind in ("admin-panel", "database"):
+        if kind in categories:
+            return ServiceFinding(
+                name=tech.name,
+                kind=kind,
+                evidence=" ".join(tech.evidence) or f"tech: {tech.name}",
+                severity=_SEVERITY[kind],
+            )
     return None
 
 
