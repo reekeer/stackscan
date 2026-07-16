@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from stackscan.types import Headers, InfraInfo
 
 _Signature = tuple[str, str, str | None]
@@ -90,6 +92,69 @@ def _proxy_notes(headers: Headers, host: str) -> list[str]:
             notes.append(f"Header '{name}' reflects requested host (reverse proxy likely)")
             break
     return notes
+
+
+_ROLE_LABEL: dict[str, str] = {"cdn": "CDN", "waf": "WAF", "proxy": "reverse proxy"}
+_ROLE_ORDER: tuple[str, ...] = ("cdn", "waf", "proxy")
+_ORG_SUFFIXES: tuple[str, ...] = (
+    ", inc.",
+    ", inc",
+    " inc.",
+    " inc",
+    " llc",
+    " ltd",
+    " ltd.",
+    " gmbh",
+    " corporation",
+    " technologies",
+)
+
+
+def _canonical_provider(org: str) -> str:
+    name = org.strip()
+    low = name.lower()
+    for suffix in _ORG_SUFFIXES:
+        if low.endswith(suffix):
+            name = name[: -len(suffix)].strip()
+            low = name.lower()
+    return name
+
+
+def summarize_edge(infra: InfraInfo, cdn_orgs: Iterable[str] = ()) -> str:
+    """One-line "behind X" summary of the edge stack.
+
+    Groups each provider with all the roles it plays (so Cloudflare shows once
+    as "CDN, WAF, reverse proxy" instead of three separate tags) and chains
+    layers front-to-back with an arrow (e.g. Cloudflare in front of the CloudFront
+    the ``Via`` header revealed). ``cdn_orgs`` adds CDN/cloud names seen only via
+    IP intelligence.
+    """
+    roles: dict[str, list[str]] = {}
+    order: list[str] = []
+    role_names = {"cdn": infra.cdn, "waf": infra.waf, "proxy": infra.proxy}
+    for role in _ROLE_ORDER:
+        for name in role_names[role]:
+            if name not in roles:
+                roles[name] = []
+                order.append(name)
+            if role not in roles[name]:
+                roles[name].append(role)
+    for org in cdn_orgs:
+        name = _canonical_provider(org)
+        if not name:
+            continue
+        if any(name.lower() in known.lower() or known.lower() in name.lower() for known in roles):
+            continue
+        roles[name] = ["cdn"]
+        order.append(name)
+    if not order:
+        return ""
+    order.sort(key=lambda n: 0 if ({"waf", "proxy"} & set(roles[n])) else 1)
+    parts: list[str] = []
+    for name in order:
+        labels = ", ".join(_ROLE_LABEL[r] for r in _ROLE_ORDER if r in roles[name])
+        parts.append(f"{name} ({labels})" if labels else name)
+    return " → ".join(parts)
 
 
 def analyze_infra(headers: Headers, cookies: tuple[str, ...], host: str) -> InfraInfo:

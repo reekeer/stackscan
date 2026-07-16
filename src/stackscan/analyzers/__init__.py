@@ -7,7 +7,7 @@ from stackscan.analyzers.cve import (
     software_from_ports,
 )
 from stackscan.analyzers.exposure import ExposureProbe, analyze_exposure
-from stackscan.analyzers.infra import analyze_infra
+from stackscan.analyzers.infra import analyze_infra, summarize_edge
 from stackscan.analyzers.osdetect import detect_os
 from stackscan.analyzers.security import analyze_security_headers
 from stackscan.analyzers.services import classify_services, port_category
@@ -19,6 +19,7 @@ __all__ = [
     "TechAnalyzer",
     "analyze_exposure",
     "analyze_infra",
+    "summarize_edge",
     "analyze_security_headers",
     "brute_devices",
     "detect_devices",

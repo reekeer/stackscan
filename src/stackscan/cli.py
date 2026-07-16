@@ -15,7 +15,7 @@ from rich.progress import Progress
 from rich.table import Table
 
 from stackscan import __version__, theme
-from stackscan.analyzers import TechAnalyzer, brute_devices
+from stackscan.analyzers import TechAnalyzer, brute_devices, summarize_edge
 from stackscan.config import NoSignaturesError, SourceError, SourceStore, build_matchers
 from stackscan.net import GeoProvider, nmap_available
 from stackscan.render import render_banner, render_reports
@@ -88,7 +88,7 @@ def _build_scan_parser() -> argparse.ArgumentParser:
         type=int,
         default=40,
         metavar="N",
-        help="Hide CVE matches with confidence below N (0-100, default 40).", 
+        help="Hide CVE matches with confidence below N (0-100, default 40).",
     )
     parser.add_argument(
         "--full",
@@ -167,7 +167,9 @@ def _build_scan_parser() -> argparse.ArgumentParser:
         default="stackscan-report",
         help="Base name/path for file exports (default: stackscan-report).",
     )
-    parser.add_argument("--graph", dest="graph", action="store_true", help="Include graph in JSON output.")
+    parser.add_argument(
+        "--graph", dest="graph", action="store_true", help="Include graph in JSON output."
+    )
     parser.add_argument("--show-empty", action="store_true", help="Show targets with no findings.")
     parser.add_argument("--compact", action="store_true", help="Compact one-row-per-target table.")
     parser.add_argument(
@@ -506,15 +508,15 @@ def _fmt_elapsed(seconds: float) -> str:
 
 def _infra_summary(report: ScanReport) -> str:
     infra = report.infra
+    cdn_orgs = [
+        info.org or info.isp for info in report.ip_info if info.is_cdn and (info.org or info.isp)
+    ]
     parts: list[str] = []
-    if infra.cdn:
-        parts.append("cdn: " + ", ".join(infra.cdn))
-    if infra.waf:
-        parts.append("waf: " + ", ".join(infra.waf))
+    edge = summarize_edge(infra, [org for org in cdn_orgs if org])
+    if edge:
+        parts.append("behind " + edge)
     if infra.server:
         parts.append("server: " + ", ".join(infra.server))
-    if infra.proxy:
-        parts.append("proxy: " + ", ".join(infra.proxy))
     return " | ".join(parts) if parts else "-"
 
 
@@ -771,7 +773,11 @@ def _scan_command(argv: list[str]) -> int:
     _apply_disable(args, err_console)
     if not getattr(args, "no_banner", False):
         render_banner(err_console)
-    if (args.ports or args.full) and (not getattr(args, "no_nmap", False)) and (not nmap_available()):
+    if (
+        (args.ports or args.full)
+        and (not getattr(args, "no_nmap", False))
+        and (not nmap_available())
+    ):
         _warn(err_console, "nmap not found — using the built-in Python connect scan.")
     if args.default_creds or args.full or args.full_auto:
         _warn(
@@ -808,7 +814,12 @@ def _scan_command(argv: list[str]) -> int:
     file_formats = [fmt for fmt in _export_formats() if fmt != "json-t"]
     if file_formats:
         _write_exports(
-            reports, elapsed, ",".join(file_formats), args.output, err_console, include_graph=args.graph
+            reports,
+            elapsed,
+            ",".join(file_formats),
+            args.output,
+            err_console,
+            include_graph=args.graph,
         )
     if json_terminal:
         _render_json(reports, elapsed, include_graph=args.graph)

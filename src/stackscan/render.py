@@ -11,7 +11,7 @@ from rich.table import Table
 from rich.text import Text
 
 from stackscan import __version__, theme
-from stackscan.analyzers import port_category
+from stackscan.analyzers import port_category, summarize_edge
 from stackscan.types import CveMatch, IpInfo, ScanReport
 from stackscan.utils import host_of
 
@@ -137,14 +137,32 @@ def _network_section(report: ScanReport) -> RenderableType | None:
     return table
 
 
+def _cdn_orgs(report: ScanReport) -> list[str]:
+    orgs: list[str] = []
+    for info in report.ip_info:
+        if not info.is_cdn:
+            continue
+        org = info.org or info.isp
+        if org and org not in orgs:
+            orgs.append(org)
+    return orgs
+
+
 def _infra_section(report: ScanReport) -> RenderableType | None:
-    """Render infrastructure notes only; CDN/WAF/Proxy/Server live in the technologies table."""
+    """Render the edge stack as one "behind X" line plus any proxy notes.
+
+    Per-provider CDN/WAF/Proxy/Server detail still lives in the technologies
+    table; this collapses the edge into a single readable summary.
+    """
     infra = report.infra
-    if not infra.notes:
+    edge = summarize_edge(infra, _cdn_orgs(report))
+    if not edge and not infra.notes:
         return None
     grid = Table.grid(padding=(0, 1))
     grid.add_column(style="bold cyan", no_wrap=True, justify="right")
     grid.add_column(overflow="fold")
+    if edge:
+        grid.add_row("Edge", Text(f"behind {edge}", style=theme.ACCENT_2))
     for note in infra.notes:
         grid.add_row("Note", Text(note, style="dim"))
     return grid
@@ -266,13 +284,15 @@ def _tech_section(report: ScanReport) -> RenderableType | None:
         if key in seen:
             return
         seen.add(key)
-        rows.append((
-            name,
-            version or "-",
-            category,
-            host if host and host != host_of(report.url) else "-",
-            f"{confidence}%",
-        ))
+        rows.append(
+            (
+                name,
+                version or "-",
+                category,
+                host if host and host != host_of(report.url) else "-",
+                f"{confidence}%",
+            )
+        )
 
     for tech in all_techs:
         category = ", ".join(tech.categories) if tech.categories else "uncategorized"
@@ -320,9 +340,7 @@ def _services_section(report: ScanReport) -> RenderableType | None:
     # Generic "service" kinds derived from technologies already live in the
     # Technologies & Software table.
     tech_services = [
-        s
-        for s in report.services
-        if not s.evidence.startswith("port ") and s.kind != "service"
+        s for s in report.services if not s.evidence.startswith("port ") and s.kind != "service"
     ]
     if not ports and not tech_services:
         if report.ports is not None:
@@ -461,9 +479,7 @@ def _takeovers_section(report: ScanReport) -> RenderableType | None:
     table.add_column("CNAME", overflow="fold")
     table.add_column("Severity", no_wrap=True)
     table.add_column("Evidence", overflow="fold")
-    for takeover in sorted(
-        report.takeovers, key=lambda t: (t.verified, t.severity), reverse=True
-    ):
+    for takeover in sorted(report.takeovers, key=lambda t: (t.verified, t.severity), reverse=True):
         color = theme.SEVERITY.get(takeover.severity.upper(), theme.MUTED)
         verified = "verified" if takeover.verified else "potential"
         table.add_row(

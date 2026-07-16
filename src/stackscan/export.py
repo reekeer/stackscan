@@ -9,6 +9,8 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from stackscan import __version__, theme
+from stackscan.analyzers import summarize_edge
+from stackscan.types import InfraInfo
 from stackscan.utils import host_of
 
 Payload = dict[str, Any]
@@ -225,19 +227,30 @@ def _html_card(r: dict[str, Any]) -> str:
         )
         body_parts.append(_section("IP intelligence", rows))
     infra = r.get("infra") or {}
-    infra_rows = "".join(
+    cdn_orgs = [
+        i.get("org") or i.get("isp")
+        for i in (r.get("ip_info") or [])
+        if i.get("is_cdn") and (i.get("org") or i.get("isp"))
+    ]
+    edge = summarize_edge(
+        InfraInfo(
+            cdn=tuple(infra.get("cdn") or ()),
+            waf=tuple(infra.get("waf") or ()),
+            proxy=tuple(infra.get("proxy") or ()),
+            server=tuple(infra.get("server") or ()),
+        ),
+        [org for org in cdn_orgs if org],
+    )
+    infra_rows = _kv("Edge", _e(f"behind {edge}")) if edge else ""
+    infra_rows += "".join(
         (
             _kv(label, _chips(infra.get(key) or []))
-            for label, key in (
-                ("CDN", "cdn"),
-                ("WAF", "waf"),
-                ("Server", "server"),
-                ("Proxy", "proxy"),
-            )
+            for label, key in (("Server", "server"),)
             if infra.get(key)
         )
     )
-    body_parts.append(_section("Infrastructure", infra_rows))
+    if infra_rows:
+        body_parts.append(_section("Infrastructure", infra_rows))
     protocols = r.get("protocols") or []
     if protocols:
         body_parts.append(_section("Protocol", _chips(protocols)))
