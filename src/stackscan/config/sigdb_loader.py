@@ -69,6 +69,7 @@ def build_matchers(
     paths = resolve_sigdb_paths(explicit, use_sources=use_sources, use_builtin=use_builtin)
     if not paths:
         raise NoSignaturesError(
-            f"No signature database found. Provide --sigdb PATH, install one at {DEFAULT_SIGDB_PATH}, or add a source with 'stackscan sigdb add <url>'."
+            "No signature database found. Add one with 'stackscan sigdb add'"
+            " (defaults to https://db.imalive.lol/sigdb)."
         )
     return [_load_matcher(path) for path in paths]

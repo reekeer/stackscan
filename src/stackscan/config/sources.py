@@ -12,6 +12,7 @@ from typing import Any, cast
 from urllib.parse import urljoin
 
 SIGDB_MAGIC = b"SIGT"
+DEFAULT_SOURCE_URL = "https://db.imalive.lol/sigdb/manifest.json"
 _RULES_FILENAMES = ("sigdb.json", "rules.json", "signatures.json")
 _DOWNLOAD_UA = "stackscan-source-manager/1.0"
 _DOWNLOAD_TIMEOUT = 30

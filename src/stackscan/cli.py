@@ -17,7 +17,13 @@ from rich.table import Table
 
 from stackscan import __version__, theme
 from stackscan.analyzers import TechAnalyzer, brute_devices, summarize_edge
-from stackscan.config import NoSignaturesError, SourceError, SourceStore, build_matchers
+from stackscan.config import (
+    DEFAULT_SOURCE_URL,
+    NoSignaturesError,
+    SourceError,
+    SourceStore,
+    build_matchers,
+)
 from stackscan.net import GeoProvider, nmap_available
 from stackscan.render import render_banner, render_reports
 from stackscan.scan import ScanOptions, StageLog, scan_target, stage_total
@@ -61,7 +67,6 @@ def _build_scan_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("targets", nargs="*", help="Target URLs or hostnames.")
     parser.add_argument("-f", "--file", dest="file", type=Path, help="File with targets, one/line.")
-    parser.add_argument("--sigdb", dest="sigdb", help="Explicit .sigdb path (overrides default).")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="Request timeout.")
     parser.add_argument("--user-agent", dest="user_agent", default=DEFAULT_USER_AGENT)
     parser.add_argument("--insecure", action="store_true", help="Disable TLS verification.")
@@ -386,7 +391,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         return []
     targets = _dedupe([normalize_url(target) for target in raw_targets])
     matchers = build_matchers(
-        args.sigdb, use_sources=not args.no_sources, use_builtin=not args.no_builtin
+        None, use_sources=not args.no_sources, use_builtin=not args.no_builtin
     )
     analyzer = TechAnalyzer(matchers)
     geo = GeoProvider(args.geoip_db)
@@ -927,13 +932,9 @@ def _sigdb_command(argv: list[str]) -> int:
     add_p = sub.add_parser("add", help="Add a signature source (local path, web URL, or git repo).")
     add_p.add_argument(
         "url",
-        help="Source: local .sigdb/rules path, http(s) URL (.sigdb/manifest.json), or git repo.",
-    )
-    add_p.add_argument(
-        "--type",
-        dest="kind",
-        choices=["path", "web", "git"],
-        help="Force the source type instead of auto-detecting.",
+        nargs="?",
+        help="Source: local .sigdb/rules path, http(s) URL (.sigdb/manifest.json), or git repo."
+        f" Defaults to {DEFAULT_SOURCE_URL}.",
     )
     sub.add_parser("list", help="List configured sources.")
     remove_p = sub.add_parser("remove", help="Remove a source by id or url.")
@@ -949,9 +950,10 @@ def _sigdb_command(argv: list[str]) -> int:
     console = Console()
     try:
         if args.action == "add":
-            source = store.add(args.url, kind=args.kind)
+            url = args.url or DEFAULT_SOURCE_URL
+            source = store.add(url)
             console.print(
-                f"[green]Added[/green] {args.url} ([cyan]{source.kind}[/cyan], id={source.id}) -> {source.path}"
+                f"[green]Added[/green] {url} ([cyan]{source.kind}[/cyan], id={source.id}) -> {source.path}"
             )
             return 0
         if args.action == "list":
