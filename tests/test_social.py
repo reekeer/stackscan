@@ -28,3 +28,14 @@ def test_parse_social_dedupes_and_ignores_non_social() -> None:
     links = parse_social(body, "https://acme.test")
     assert len(links) == 1
     assert links[0].platform == "Twitter/X"
+
+
+def test_parse_social_rejects_bogus_phone_and_email() -> None:
+    body = '<a href="tel:8">x</a><a href="tel:0">y</a><a href="mailto:notanemail">z</a>'
+    links = parse_social(body, "https://acme.test")
+    assert links == []
+
+
+def test_parse_social_keeps_real_phone() -> None:
+    links = parse_social('<a href="tel:+1-555-123-4567">call</a>', "https://acme.test")
+    assert [link.platform for link in links] == ["Phone"]

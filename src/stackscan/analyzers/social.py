@@ -37,10 +37,14 @@ def _social_link(raw: str, base_url: str) -> SocialLink | None:
     low = value.lower()
     if low.startswith("mailto:"):
         addr = value[7:].split("?", 1)[0].strip()
-        return SocialLink("Email", "mailto:" + addr, addr) if addr else None
+        if addr and "@" in addr and "." in addr.split("@", 1)[-1]:
+            return SocialLink("Email", "mailto:" + addr, addr)
+        return None
     if low.startswith("tel:"):
         num = value[4:].strip()
-        return SocialLink("Phone", value, num) if num else None
+        if sum(char.isdigit() for char in num) >= 6:
+            return SocialLink("Phone", value, num)
+        return None
     if low.startswith("//"):
         value = "https:" + value
     elif not low.startswith(("http://", "https://")):
