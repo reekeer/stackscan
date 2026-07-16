@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import socket
 
 import aiohttp
@@ -10,13 +11,6 @@ from stackscan.net.dns import resolve_ips
 
 
 class FallbackResolver(AbstractResolver):
-    """Resolve via cached public DNS first, then the system resolver.
-
-    Public resolvers are both fast and give the outside-world view a scanner
-    wants; the system resolver is only consulted when the public path returns
-    nothing (internal names, split-horizon DNS, or blocked outbound 53).
-    """
-
     def __init__(self) -> None:
         self._system = ThreadedResolver()
 
@@ -40,7 +34,8 @@ class FallbackResolver(AbstractResolver):
             results: list[ResolveResult] = []
             for fam in families:
                 want_v6 = fam == socket.AF_INET6
-                for address in await self._lookup(host, want_v6):
+                addresses = await asyncio.to_thread(resolve_ips, host, want_v6=want_v6)
+                for address in addresses:
                     results.append(
                         ResolveResult(
                             hostname=host,
@@ -54,12 +49,6 @@ class FallbackResolver(AbstractResolver):
             return results
         except Exception:
             return []
-
-    @staticmethod
-    async def _lookup(host: str, want_v6: bool) -> list[str]:
-        import asyncio
-
-        return await asyncio.to_thread(resolve_ips, host, want_v6=want_v6)
 
     async def close(self) -> None:
         await self._system.close()

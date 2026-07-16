@@ -42,7 +42,6 @@ def test_summarize_edge_groups_provider_roles() -> None:
 
 def test_summarize_edge_chains_layers_front_to_back() -> None:
     infra = InfraInfo(cdn=("Cloudflare", "Amazon CloudFront"), waf=("Cloudflare",))
-    # Cloudflare plays WAF so it is the active front; CloudFront trails behind.
     assert summarize_edge(infra) == "Cloudflare (CDN, WAF) → Amazon CloudFront (CDN)"
 
 
@@ -51,7 +50,6 @@ def test_summarize_edge_adds_ip_only_cdn_orgs() -> None:
     edge = summarize_edge(infra, ["Fastly, Inc.", "Cloudflare, Inc."])
     assert "Cloudflare (CDN, WAF)" in edge
     assert "Fastly (CDN)" in edge
-    # the "Cloudflare, Inc." IP org must not duplicate the existing provider
     assert edge.count("Cloudflare") == 1
 
 

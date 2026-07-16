@@ -121,14 +121,6 @@ def _canonical_provider(org: str) -> str:
 
 
 def summarize_edge(infra: InfraInfo, cdn_orgs: Iterable[str] = ()) -> str:
-    """One-line "behind X" summary of the edge stack.
-
-    Groups each provider with all the roles it plays (so Cloudflare shows once
-    as "CDN, WAF, reverse proxy" instead of three separate tags) and chains
-    layers front-to-back with an arrow (e.g. Cloudflare in front of the CloudFront
-    the ``Via`` header revealed). ``cdn_orgs`` adds CDN/cloud names seen only via
-    IP intelligence.
-    """
     roles: dict[str, list[str]] = {}
     order: list[str] = []
     role_names = {"cdn": infra.cdn, "waf": infra.waf, "proxy": infra.proxy}

@@ -149,11 +149,6 @@ def _cdn_orgs(report: ScanReport) -> list[str]:
 
 
 def _infra_section(report: ScanReport) -> RenderableType | None:
-    """Render the edge stack as one "behind X" line plus any proxy notes.
-
-    Per-provider CDN/WAF/Proxy/Server detail still lives in the technologies
-    table; this collapses the edge into a single readable summary.
-    """
     infra = report.infra
     edge = summarize_edge(infra, _cdn_orgs(report))
     if not edge and not infra.notes:

@@ -2,21 +2,15 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from threading import Lock
 from typing import Any, cast
 
 _QUERY_TIMEOUT = 2.5
 _QUERY_LIFETIME = 5.0
 _RECORD_TYPES = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
 
-# Public resolvers. Cloudflare + Google answer correctly almost everywhere and
-# DNS records barely change between them, so there is no need to poll a domain's
-# own registrar on every run. The rest are censorship-resistant fallbacks for
-# regions where the first two are blocked or throttled (Yandex in particular
-# stays reachable across most of the CIS). They are tried in order and a query
-# only moves on when one times out, so healthy networks pay for the first entry.
 _PUBLIC_NAMESERVERS: tuple[str, ...] = (
     "1.1.1.1",
     "1.0.0.1",
@@ -56,17 +50,11 @@ def _load_dns() -> Any | None:
     return cast("Any", importlib.import_module("dns"))
 
 
-_cache_lock = threading.Lock()
+_cache_lock = Lock()
 _shared_cache: Any = None
 
 
 def _resolver(dns_mod: Any, *, public: bool) -> Any:
-    """Build a resolver backed by a process-wide, TTL-respecting cache.
-
-    A fresh Resolver is cheap; sharing only the (thread-safe) cache keeps
-    repeated lookups within a run instant while avoiding any per-instance
-    threading concerns when the record types are queried in parallel.
-    """
     global _shared_cache
     if public:
         resolver = dns_mod.resolver.Resolver(configure=False)
@@ -178,9 +166,6 @@ def resolve_host(host: str, *, reverse: bool = True) -> DnsResult:
     if dns_mod is None:
         return _resolve_host_stdlib(host, reverse=reverse)
     records, ttls = _gather(dns_mod, host, public=True)
-    # Only fall back to the system resolver when the public path returned no
-    # addresses at all (e.g. a network that blocks outbound 53 or split-horizon
-    # DNS), and only if the system resolver actually knows the name.
     if not records.get("A") and not records.get("AAAA"):
         sys_records, sys_ttls = _gather(dns_mod, host, public=False)
         if sys_records.get("A") or sys_records.get("AAAA"):
@@ -205,8 +190,6 @@ def resolve_host(host: str, *, reverse: bool = True) -> DnsResult:
 
 
 def resolve_ips(host: str, *, want_v6: bool = False) -> list[str]:
-    """Fast, cached A/AAAA lookup for connecting to a host (used by the HTTP
-    connector). Returns literals unchanged and never raises."""
     try:
         ipaddress.ip_address(host)
         return [host]

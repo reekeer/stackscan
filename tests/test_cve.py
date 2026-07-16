@@ -142,9 +142,6 @@ def test_match_cves_marks_ubuntu_banner_unconfirmed() -> None:
 
 
 def test_backport_cves_hidden_at_default_threshold() -> None:
-    # Distro-backported / SSH banner matches are phantom CVEs by default: they
-    # must fall below the CLI default of --cve-min-confidence 40 so they never
-    # surface unless the user explicitly asks for a lower threshold.
     software = extract_software({"server": "nginx/1.24.0 (Ubuntu)"}, "")
     assert match_cves(software)
     assert match_cves(software, min_confidence=40) == []
