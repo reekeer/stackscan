@@ -23,3 +23,20 @@ def test_format_soa() -> None:
 def test_format_ns_strips_trailing_dot() -> None:
     rdata = SimpleNamespace(target="ns1.example.com.")
     assert _format_rdata("NS", rdata) == "ns1.example.com"
+
+
+def test_format_https_and_svcb_use_rdata_string() -> None:
+    class Rdata:
+        def __str__(self) -> str:
+            return '1 . alpn="h3,h2"'
+
+    assert _format_rdata("HTTPS", Rdata()) == '1 . alpn="h3,h2"'
+    assert _format_rdata("SVCB", Rdata()) == '1 . alpn="h3,h2"'
+
+
+def test_format_ds_uses_rdata_string() -> None:
+    class Rdata:
+        def __str__(self) -> str:
+            return "2371 13 2 abcd."
+
+    assert _format_rdata("DS", Rdata()) == "2371 13 2 abcd"

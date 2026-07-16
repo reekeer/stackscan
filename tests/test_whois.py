@@ -46,6 +46,22 @@ def test_parse_registrar_only_marks_registrant_withheld() -> None:
     assert info.statuses == ("client transfer prohibited",)
 
 
+def test_parse_nameservers_dnssec_and_registrar_url() -> None:
+    data = _rdap([_entity(["registrar"], fn="Gandi", url="https://gandi.net")])
+    data["nameservers"] = [{"ldhName": "NS1.EXAMPLE.NET."}, {"ldhName": "ns2.example.net"}]
+    data["secureDNS"] = {"delegationSigned": True}
+    info = _parse_rdap("example.com", data)
+    assert info.nameservers == ("ns1.example.net", "ns2.example.net")
+    assert info.dnssec == "signed"
+    assert info.registrar_url == "https://gandi.net"
+
+
+def test_parse_dnssec_unsigned() -> None:
+    data = _rdap([_entity(["registrar"], fn="Gandi")])
+    data["secureDNS"] = {"delegationSigned": False}
+    assert _parse_rdap("example.com", data).dnssec == "unsigned"
+
+
 def test_parse_public_registrant_is_exposed() -> None:
     info = _parse_rdap(
         "example.com",

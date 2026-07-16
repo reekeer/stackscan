@@ -9,8 +9,6 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from stackscan import __version__, theme
-from stackscan.analyzers import summarize_edge
-from stackscan.types import InfraInfo
 from stackscan.utils import host_of
 
 Payload = dict[str, Any]
@@ -208,15 +206,19 @@ def _html_card(r: dict[str, Any]) -> str:
             vals = net.get(key) or []
             if vals:
                 rows.append(_kv(label, _chips(vals)))
+        for rrtype, vals in sorted((net.get("extras") or {}).items()):
+            if vals:
+                rows.append(_kv(rrtype, _chips(vals)))
         domains = net.get("domains") or []
         if domains:
             rows.append(_kv("Domains", _chips(sorted(set(domains)))))
         body_parts.append(_section("Network / DNS", "".join(rows)))
     whois = r.get("whois") or {}
     if whois:
-        rows = ""
-        if whois.get("registrar"):
-            rows += _kv("Registrar", _e(whois["registrar"]))
+        registrar = whois.get("registrar") or ""
+        if registrar and whois.get("registrar_url"):
+            registrar += f" · {whois['registrar_url']}"
+        rows = _kv("Registrar", _e(registrar)) if registrar else ""
         if whois.get("registrant_public") and whois.get("registrant"):
             rows += _kv("Registrant", _e(whois["registrant"]))
         elif whois.get("privacy"):
@@ -224,10 +226,16 @@ def _html_card(r: dict[str, Any]) -> str:
         dates = []
         if whois.get("created"):
             dates.append(f"registered {_e(str(whois['created'])[:10])}")
+        if whois.get("updated"):
+            dates.append(f"updated {_e(str(whois['updated'])[:10])}")
         if whois.get("expires"):
             dates.append(f"expires {_e(str(whois['expires'])[:10])}")
         if dates:
             rows += _kv("Dates", " · ".join(dates))
+        if whois.get("nameservers"):
+            rows += _kv("Nameservers", _chips(whois["nameservers"]))
+        if whois.get("dnssec"):
+            rows += _kv("DNSSEC", _e(whois["dnssec"]))
         if whois.get("statuses"):
             rows += _kv("Status", _e(", ".join(whois["statuses"])))
         if rows:
@@ -246,31 +254,6 @@ def _html_card(r: dict[str, Any]) -> str:
             for i in ipinfo
         )
         body_parts.append(_section("IP intelligence", rows))
-    infra = r.get("infra") or {}
-    cdn_orgs = [
-        i.get("org") or i.get("isp")
-        for i in (r.get("ip_info") or [])
-        if i.get("is_cdn") and (i.get("org") or i.get("isp"))
-    ]
-    edge = summarize_edge(
-        InfraInfo(
-            cdn=tuple(infra.get("cdn") or ()),
-            waf=tuple(infra.get("waf") or ()),
-            proxy=tuple(infra.get("proxy") or ()),
-            server=tuple(infra.get("server") or ()),
-        ),
-        [org for org in cdn_orgs if org],
-    )
-    infra_rows = _kv("Edge", _e(f"behind {edge}")) if edge else ""
-    infra_rows += "".join(
-        (
-            _kv(label, _chips(infra.get(key) or []))
-            for label, key in (("Server", "server"),)
-            if infra.get(key)
-        )
-    )
-    if infra_rows:
-        body_parts.append(_section("Infrastructure", infra_rows))
     protocols = r.get("protocols") or []
     if protocols:
         body_parts.append(_section("Protocol", _chips(protocols)))
@@ -314,20 +297,6 @@ def _html_card(r: dict[str, Any]) -> str:
             _section(
                 "Services",
                 f"<table><thead><tr><th>Service</th><th>Kind</th><th>Severity</th><th>Evidence</th></tr></thead><tbody>{rows}</tbody></table>",
-            )
-        )
-    os_findings = r.get("os_findings") or []
-    if os_findings:
-        rows = "".join(
-            f"<tr><td>{_e(o.get('host'))}</td><td>{_e(o.get('os'))}</td>"
-            f"<td>{_e(o.get('service'))}</td><td>{_e(o.get('category'))}</td>"
-            f"<td>{_e(o.get('source'))}  ({int((o.get('confidence') or 0) * 100)}%)</td></tr>"
-            for o in os_findings
-        )
-        body_parts.append(
-            _section(
-                "Hosts & OS",
-                f"<table><thead><tr><th>Host</th><th>OS</th><th>Service</th><th>Category</th><th>Source</th></tr></thead><tbody>{rows}</tbody></table>",
             )
         )
     software = r.get("software") or []

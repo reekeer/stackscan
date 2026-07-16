@@ -75,3 +75,52 @@ def test_to_html_is_self_contained_and_themed() -> None:
     assert "force-directed" in out or "netgraph" in out
     assert "Services" in out
     assert "MySQL" in out
+
+
+def test_to_html_includes_network_extras() -> None:
+    payload = {
+        "results": [
+            {
+                "url": "https://a.test",
+                "final_url": "https://a.test",
+                "status": 200,
+                "network": {
+                    "ipv4": ["1.2.3.4"],
+                    "extras": {"HTTPS": ['1 . alpn="h3,h2"'], "DS": ["2371 13 2 abcd"]},
+                },
+            }
+        ]
+    }
+    out = to_html(payload)
+    assert "HTTPS" in out
+    assert "alpn=" in out
+    assert "h3,h2" in out
+    assert "DS" in out
+
+
+def test_to_html_includes_whois_fields() -> None:
+    payload = {
+        "results": [
+            {
+                "url": "https://a.test",
+                "final_url": "https://a.test",
+                "status": 200,
+                "whois": {
+                    "domain": "a.test",
+                    "registrar": "Example Registrar",
+                    "registrar_url": "https://example.com",
+                    "nameservers": ["ns1.example.com"],
+                    "dnssec": "signed",
+                    "created": "2025-01-01T00:00:00Z",
+                    "updated": "2026-01-01T00:00:00Z",
+                    "expires": "2027-01-01T00:00:00Z",
+                    "statuses": ["client transfer prohibited"],
+                },
+            }
+        ]
+    }
+    out = to_html(payload)
+    assert "Example Registrar" in out
+    assert "https://example.com" in out
+    assert "ns1.example.com" in out
+    assert "signed" in out

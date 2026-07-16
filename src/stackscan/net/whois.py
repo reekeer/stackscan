@@ -91,6 +91,40 @@ def _registrar_name(entity: dict[str, Any] | None) -> str | None:
     return str(handle) if handle else None
 
 
+def _registrar_url(entity: dict[str, Any] | None) -> str | None:
+    if not entity:
+        return None
+    url = _vcard(entity).get("url")
+    if url:
+        return url
+    for link in cast("list[dict[str, Any]]", entity.get("links") or []):
+        href = link.get("href")
+        if href and link.get("rel") in ("about", "self"):
+            return str(href)
+    return None
+
+
+def _nameservers(data: dict[str, Any]) -> tuple[str, ...]:
+    out: list[str] = []
+    for ns in cast("list[dict[str, Any]]", data.get("nameservers") or []):
+        name = str(ns.get("ldhName") or ns.get("unicodeName") or "").rstrip(".").lower()
+        if name and name not in out:
+            out.append(name)
+    return tuple(out)
+
+
+def _dnssec(data: dict[str, Any]) -> str:
+    secure = data.get("secureDNS")
+    if not isinstance(secure, dict):
+        return ""
+    signed = cast("dict[str, Any]", secure).get("delegationSigned")
+    if signed is True:
+        return "signed"
+    if signed is False:
+        return "unsigned"
+    return ""
+
+
 def _event(events: list[dict[str, Any]], action: str) -> str | None:
     for event in events:
         if str(event.get("eventAction", "")).lower() == action:
@@ -121,7 +155,8 @@ def _privacy(
 
 def _parse_rdap(domain: str, data: dict[str, Any]) -> WhoisInfo:
     entities = cast("list[dict[str, Any]]", data.get("entities") or [])
-    registrar = _registrar_name(_find_role(entities, "registrar"))
+    registrar_entity = _find_role(entities, "registrar")
+    registrar = _registrar_name(registrar_entity)
     registrant_entity = _find_role(entities, "registrant")
     events = cast("list[dict[str, Any]]", data.get("events") or [])
     statuses = tuple(str(s) for s in cast("list[Any]", data.get("status") or []))
@@ -129,11 +164,14 @@ def _parse_rdap(domain: str, data: dict[str, Any]) -> WhoisInfo:
     return WhoisInfo(
         domain=domain,
         registrar=registrar,
+        registrar_url=_registrar_url(registrar_entity),
         registrant=contact,
         registrant_public=public,
         privacy=note,
         created=_event(events, "registration"),
         updated=_event(events, "last changed"),
         expires=_event(events, "expiration"),
+        nameservers=_nameservers(data),
+        dnssec=_dnssec(data),
         statuses=statuses,
     )

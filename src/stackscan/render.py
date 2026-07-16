@@ -12,7 +12,7 @@ from rich.table import Table
 from rich.text import Text
 
 from stackscan import __version__, theme
-from stackscan.analyzers import port_category, summarize_edge
+from stackscan.analyzers import port_category
 from stackscan.types import CveMatch, IpInfo, ScanReport
 from stackscan.utils import host_of
 
@@ -108,6 +108,8 @@ def _network_section(report: ScanReport) -> RenderableType | None:
         add("TXT", host, net.txt)
         add("SOA", host, net.soa)
         add("CAA", host, net.caa)
+        for rrtype in sorted(net.extras):
+            add(rrtype, host, net.extras[rrtype])
         for ip, name in sorted(net.reverse_dns.items(), key=lambda x: _ip_sort_key(x[0])):
             rows.append(("PTR", ip, name))
         if net.geo:
@@ -145,17 +147,6 @@ def _network_section(report: ScanReport) -> RenderableType | None:
     return table
 
 
-def _cdn_orgs(report: ScanReport) -> list[str]:
-    orgs: list[str] = []
-    for info in report.ip_info:
-        if not info.is_cdn:
-            continue
-        org = info.org or info.isp
-        if org and org not in orgs:
-            orgs.append(org)
-    return orgs
-
-
 def _whois_section(report: ScanReport) -> RenderableType | None:
     whois = report.whois
     if whois is None:
@@ -163,8 +154,11 @@ def _whois_section(report: ScanReport) -> RenderableType | None:
     grid = Table.grid(padding=(0, 1))
     grid.add_column(style="bold cyan", no_wrap=True, justify="right")
     grid.add_column(overflow="fold")
-    if whois.registrar:
-        grid.add_row("Registrar", whois.registrar)
+    registrar = whois.registrar or ""
+    if registrar and whois.registrar_url:
+        registrar += f"  ·  {whois.registrar_url}"
+    if registrar:
+        grid.add_row("Registrar", registrar)
     if whois.registrant_public and whois.registrant:
         grid.add_row("Registrant", Text(whois.registrant, style=theme.WARN))
     elif whois.privacy:
@@ -172,10 +166,17 @@ def _whois_section(report: ScanReport) -> RenderableType | None:
     dates: list[str] = []
     if whois.created:
         dates.append(f"registered {whois.created[:10]}")
+    if whois.updated:
+        dates.append(f"updated {whois.updated[:10]}")
     if whois.expires:
         dates.append(f"expires {whois.expires[:10]}")
     if dates:
         grid.add_row("Dates", "  ·  ".join(dates))
+    if whois.nameservers:
+        grid.add_row("Nameservers", ", ".join(whois.nameservers))
+    if whois.dnssec:
+        style = theme.SUCCESS if whois.dnssec == "signed" else theme.MUTED
+        grid.add_row("DNSSEC", Text(whois.dnssec, style=style))
     if whois.statuses:
         shown = ", ".join(whois.statuses[:4])
         if len(whois.statuses) > 4:
@@ -183,21 +184,6 @@ def _whois_section(report: ScanReport) -> RenderableType | None:
         grid.add_row("Status", Text(shown, style="dim"))
     if not grid.row_count:
         return None
-    return grid
-
-
-def _infra_section(report: ScanReport) -> RenderableType | None:
-    infra = report.infra
-    edge = summarize_edge(infra, _cdn_orgs(report), sep=f" {_glyphs().arrow} ")
-    if not edge and not infra.notes:
-        return None
-    grid = Table.grid(padding=(0, 1))
-    grid.add_column(style="bold cyan", no_wrap=True, justify="right")
-    grid.add_column(overflow="fold")
-    if edge:
-        grid.add_row("Edge", Text(f"behind {edge}", style=theme.ACCENT_2))
-    for note in infra.notes:
-        grid.add_row("Note", Text(note, style="dim"))
     return grid
 
 
@@ -306,26 +292,26 @@ def _tls_section(report: ScanReport) -> RenderableType | None:
     return grid
 
 
+_EDGE_CATEGORIES: frozenset[str] = frozenset({"edge", "cdn", "waf", "proxy"})
+
+
 def _tech_section(report: ScanReport) -> RenderableType | None:
-    """Render technologies and extracted software as a flat table."""
     all_techs = report.all_technologies()
+    primary = host_of(report.url)
     rows: list[tuple[str, str, str, str, str]] = []
     seen: set[tuple[str, str | None, str]] = set()
 
     def _add_row(name: str, version: str | None, category: str, host: str, confidence: int) -> None:
-        key = (name.lower(), version, host)
+        is_edge = any(cat in _EDGE_CATEGORIES for cat in category.split(", "))
+        host_cell = host or primary or "-"
+        if is_edge:
+            key = (name.lower(), version, "")
+        else:
+            key = (name.lower(), version, host)
         if key in seen:
             return
         seen.add(key)
-        rows.append(
-            (
-                name,
-                version or "-",
-                category,
-                host if host and host != host_of(report.url) else "-",
-                f"{confidence}%",
-            )
-        )
+        rows.append((name, version or "-", category, host_cell, f"{confidence}%"))
 
     for tech in all_techs:
         category = ", ".join(tech.categories) if tech.categories else "uncategorized"
@@ -548,26 +534,6 @@ def _subdomains_section(report: ScanReport) -> RenderableType | None:
     return table if table.row_count else None
 
 
-def _os_section(report: ScanReport) -> RenderableType | None:
-    if not report.os_findings:
-        return None
-    table = Table(box=None, pad_edge=False)
-    table.add_column("Host", style="bold cyan", overflow="fold")
-    table.add_column("OS", overflow="fold")
-    table.add_column("Service", overflow="fold")
-    table.add_column("Category", overflow="fold")
-    table.add_column("Source", overflow="fold")
-    for finding in report.os_findings:
-        table.add_row(
-            finding.host,
-            finding.os,
-            finding.service,
-            finding.category,
-            f"{finding.source}  ({int(finding.confidence * 100)}%)",
-        )
-    return table
-
-
 def _social_section(report: ScanReport) -> RenderableType | None:
     if not report.social:
         return None
@@ -580,20 +546,6 @@ def _social_section(report: ScanReport) -> RenderableType | None:
     for platform in sorted(by_platform):
         links = ", ".join(dict.fromkeys(by_platform[platform]))
         grid.add_row(platform, Text(links, style=theme.ACCENT))
-    return grid
-
-
-def _security_section(report: ScanReport) -> RenderableType | None:
-    sec = report.security
-    if not sec.present and (not sec.missing):
-        return None
-    grid = Table.grid(padding=(0, 1))
-    grid.add_column(style="bold cyan", no_wrap=True, justify="right")
-    grid.add_column(overflow="fold")
-    if sec.present:
-        grid.add_row("Present", Text(", ".join(sorted(sec.present)), style="green"))
-    if sec.missing:
-        grid.add_row("Missing", Text(", ".join(sec.missing), style="red"))
     return grid
 
 
@@ -631,17 +583,14 @@ _SECTIONS: tuple[tuple[str, _SectionBuilder], ...] = (
     ("Network / DNS", _network_section),
     ("Registration (WHOIS)", _whois_section),
     ("IP intelligence", _ipinfo_section),
-    ("Infrastructure", _infra_section),
     ("TLS / Protocol", _tls_section),
     ("Technologies & Software", _tech_section),
     ("Vulnerabilities (CVE)", _cve_section),
     ("Services & open ports", _services_section),
-    ("Hosts & OS", _os_section),
     ("Default creds / open devices", _creds_section),
     ("Secrets & leaks", _secrets_section),
     ("Subdomain takeovers", _takeovers_section),
     ("Subdomains", _subdomains_section),
-    ("Security headers", _security_section),
     ("Exposure", _exposure_section),
     ("Social & contacts", _social_section),
 )

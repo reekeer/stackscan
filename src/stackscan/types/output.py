@@ -41,6 +41,7 @@ class NetworkInfo:
     geo: dict[str, dict[str, str]] = field(default_factory=dict[str, dict[str, str]])
     domains: tuple[str, ...] = ()
     dns_ttl: dict[str, int] = field(default_factory=dict[str, int])
+    extras: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +58,7 @@ class NetworkInfo:
             "geo": self.geo,
             "domains": list(self.domains),
             "dns_ttl": self.dns_ttl,
+            "extras": {k: list(v) for k, v in self.extras.items()},
         }
 
 
@@ -108,12 +110,15 @@ class InfraInfo:
 class WhoisInfo:
     domain: str
     registrar: str | None = None
+    registrar_url: str | None = None
     registrant: str | None = None
     registrant_public: bool = False
     privacy: str = ""
     created: str | None = None
     updated: str | None = None
     expires: str | None = None
+    nameservers: tuple[str, ...] = ()
+    dnssec: str = ""
     statuses: tuple[str, ...] = ()
     source: str = "rdap"
 
@@ -121,12 +126,15 @@ class WhoisInfo:
         return {
             "domain": self.domain,
             "registrar": self.registrar,
+            "registrar_url": self.registrar_url,
             "registrant": self.registrant,
             "registrant_public": self.registrant_public,
             "privacy": self.privacy,
             "created": self.created,
             "updated": self.updated,
             "expires": self.expires,
+            "nameservers": list(self.nameservers),
+            "dnssec": self.dnssec,
             "statuses": list(self.statuses),
             "source": self.source,
         }

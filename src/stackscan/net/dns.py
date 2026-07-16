@@ -9,7 +9,9 @@ from typing import Any, cast
 
 _QUERY_TIMEOUT = 2.5
 _QUERY_LIFETIME = 5.0
-_RECORD_TYPES = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
+_CORE_TYPES = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
+_EXTRA_TYPES = ("HTTPS", "SVCB", "DS")
+_RECORD_TYPES = _CORE_TYPES + _EXTRA_TYPES
 
 _PUBLIC_NAMESERVERS: tuple[str, ...] = (
     "1.1.1.1",
@@ -173,6 +175,7 @@ def resolve_host(host: str, *, reverse: bool = True) -> DnsResult:
     ipv4 = records.get("A", ())
     ipv6 = records.get("AAAA", ())
     reverse_map = _reverse_lookup(dns_mod, (*ipv4, *ipv6)) if reverse else {}
+    extras = {rdtype: records[rdtype] for rdtype in _EXTRA_TYPES if records.get(rdtype)}
     return DnsResult(
         host=host,
         ipv4=ipv4,
@@ -185,6 +188,7 @@ def resolve_host(host: str, *, reverse: bool = True) -> DnsResult:
         soa=records.get("SOA", ()),
         caa=records.get("CAA", ()),
         resolver_available=bool(records),
+        extras=extras,
         ttl=ttls,
     )
 
