@@ -89,7 +89,7 @@ _POWERED_BY_PLAIN_RE = re.compile(
 _SERVER_VERSION_RE = re.compile(
     r"\b("
     + "|".join(re.escape(name) for name in sorted(SERVER_NAMES, key=len, reverse=True))
-    + r")[/ ]v?(\d+\.\d+(?:\.\d+)?)",
+    + r")[/ ]v?(\d+\.\d+(?:\.\d+){0,2})",
     re.IGNORECASE,
 )
 

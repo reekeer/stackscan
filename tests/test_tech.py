@@ -180,3 +180,45 @@ def test_detects_generic_service_from_powered_by_footer(tmp_path: Path) -> None:
     assert "CurseForge" in techs
     assert techs["CurseForge"].version == "2.11.4"
     assert "service" in techs["CurseForge"].categories
+
+
+def test_detects_caddy_from_404_body(tmp_path: Path) -> None:
+    analyzer = TechAnalyzer([_matcher(tmp_path)])
+    result = FetchResult(
+        url="https://example.com/unknown",
+        status=404,
+        headers={},
+        body="<html><body>Caddy/v2.7.6</body></html>",
+        cookies=(),
+    )
+    techs = {tech.name: tech for tech in analyzer.detect(result)}
+    assert "Caddy" in techs
+    assert techs["Caddy"].version == "2.7.6"
+
+
+def test_detects_openresty_from_404_body(tmp_path: Path) -> None:
+    analyzer = TechAnalyzer([_matcher(tmp_path)])
+    result = FetchResult(
+        url="https://example.com/unknown",
+        status=404,
+        headers={},
+        body="<html><body><center>openresty/1.21.4.3</center></body></html>",
+        cookies=(),
+    )
+    techs = {tech.name: tech for tech in analyzer.detect(result)}
+    assert "openresty" in techs
+    assert techs["openresty"].version == "1.21.4.3"
+
+
+def test_detects_generic_commit_without_core_keyword(tmp_path: Path) -> None:
+    analyzer = TechAnalyzer([_matcher(tmp_path)])
+    result = FetchResult(
+        url="https://example.com",
+        status=200,
+        headers={},
+        body="<footer>CurseForge (a26fded)</footer>",
+        cookies=(),
+    )
+    techs = {tech.name: tech for tech in analyzer.detect(result)}
+    assert "CurseForge" in techs
+    assert techs["CurseForge"].version == "a26fded"
