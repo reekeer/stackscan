@@ -427,7 +427,6 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
     from rich.progress import (
         BarColumn,
         MofNCompleteColumn,
-        SpinnerColumn,
         TextColumn,
         TimeElapsedColumn,
     )
@@ -511,9 +510,8 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
     _set_title(f"stackscan · scanning {total_targets} target(s)")
     async with StackscanSession() as session:
         if not is_json_terminal():
-            transient = args.verbose < 2
+            transient = args.verbose == 0
             with Progress(
-                SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
                 BarColumn(),
                 MofNCompleteColumn(),
