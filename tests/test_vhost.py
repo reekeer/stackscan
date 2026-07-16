@@ -116,6 +116,37 @@ def test_discover_vhosts_extracts_hosts_from_content() -> None:
     assert "api.example.com" not in names
 
 
+class _CatchAllSession:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, str] | None]] = []
+
+    async def fetch(
+        self,
+        url: str,
+        *,
+        timeout: float,
+        user_agent: str,
+        insecure: bool,
+        max_bytes: int,
+        headers: dict[str, str] | None = None,
+        allow_redirects: bool = True,
+    ) -> FetchResult:
+        self.calls.append((url, headers))
+        host = headers.get("Host") if headers else None
+        status = 403 if host is None else 200
+        return FetchResult(
+            url=url, status=status, headers={"_raw": ""}, body="ok", cookies=(), http_version="1.1"
+        )
+
+
+def test_discover_vhosts_skips_catch_all_ip() -> None:
+    report = _make_report()
+    options = _options()
+    session = _CatchAllSession()
+    found = asyncio.run(discover_vhosts(report, session, options))  # type: ignore[arg-type]
+    assert found == []
+
+
 def test_discover_vhosts_respects_full_flag() -> None:
     report = _make_report()
     options = ScanOptions(

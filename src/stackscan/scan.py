@@ -595,6 +595,62 @@ def _subdomains_from_content(report: ScanReport, body: str) -> set[str]:
     return hostnames_in_records((body,), apex)
 
 
+def _vhost_matches(
+    status: int | None,
+    location: str,
+    indicator: str,
+    vname: str,
+    baseline_status: int,
+) -> bool:
+    if status is None:
+        return False
+    if _is_default_vhost_redirect(vname, status, location, baseline_status):
+        return False
+    if 200 <= baseline_status < 400 and status in (429, 503, 502, 403, 451):
+        return False
+    return (
+        status != baseline_status
+        or vname.lower() in indicator
+        or vname.replace(".", "-") in indicator
+    )
+
+
+async def _vhost_catch_all(
+    session: StackscanSession,
+    targets: list[tuple[str, int, bool]],
+    apex: str,
+    baselines: dict[tuple[str, int, bool], tuple[int | None, str, str | None]],
+    options: ScanOptions,
+) -> set[tuple[str, int, bool]]:
+    if not apex:
+        return set()
+
+    async def check(target: tuple[str, int, bool]) -> tuple[str, int, bool] | None:
+        baseline = baselines.get(target)
+        if baseline is None or baseline[0] is None:
+            return None
+        ip, port, tls = target
+        for _ in range(2):
+            name = f"{secrets.token_hex(10)}.{apex}"
+            vname, status, location, indicator = await _probe_vhost(
+                session,
+                ip,
+                port,
+                tls,
+                name,
+                options.user_agent,
+                _VHOST_PROBE_TIMEOUT,
+                options.max_bytes,
+                baseline[0],
+            )
+            if _vhost_matches(status, location, indicator, vname, baseline[0]):
+                return target
+        return None
+
+    results = await asyncio.gather(*(check(t) for t in targets))
+    return {t for t in results if t is not None}
+
+
 async def discover_vhosts(
     report: ScanReport,
     session: StackscanSession,
@@ -631,6 +687,11 @@ async def discover_vhosts(
         _VHOST_BASELINE_TIMEOUT,
         options.max_bytes,
     )
+    apex = report.network.host if report.network else host_of(report.url)
+    catch_all = await _vhost_catch_all(session, targets, apex, baselines, options)
+    targets = [t for t in targets if t not in catch_all]
+    if not targets:
+        return []
     semaphore = asyncio.Semaphore(max(options.workers, 50))
 
     async def one(target: tuple[str, int, bool], name: str) -> tuple[str, tuple[str, ...]] | None:
@@ -650,20 +711,7 @@ async def discover_vhosts(
                 options.max_bytes,
                 baseline[0],
             )
-        if status is None:
-            return None
-        if _is_default_vhost_redirect(vname, status, location, baseline[0]):
-            return None
-        # Treat rate-limit / WAF / transient errors as non-matches when the
-        # baseline was a normal page. They are not reliable vhost indicators.
-        if 200 <= baseline[0] < 400:
-            if status in (429, 503, 502, 403, 451):
-                return None
-        if (
-            status != baseline[0]
-            or vname.lower() in indicator
-            or vname.replace(".", "-") in indicator
-        ):
+        if _vhost_matches(status, location, indicator, vname, baseline[0]):
             return (vname, (ip,))
         return None
 
