@@ -430,6 +430,7 @@ class BruteTarget:
     tls: bool = False
     service: str = ""
     is_camera: bool = False
+    login: str = "basic"
 
     @property
     def target(self) -> str:

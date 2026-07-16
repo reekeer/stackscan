@@ -222,31 +222,45 @@ async def _probe_endpoint(
     url = f"{scheme}://{host}:{port}/"
     target = f"{host}:{port}"
     try:
-        async with session.get(url, allow_redirects=False) as resp:
+        async with session.get(url, allow_redirects=True) as resp:
             status = resp.status
             server = resp.headers.get("Server", "")
             realm = resp.headers.get("WWW-Authenticate", "")
+            body = ""
+            if status < 400:
+                body = (await resp.content.read(20000)).decode("utf-8", "replace")
     except (aiohttp.ClientError, TimeoutError, OSError):
         return None
-    device = _looks_like_device(realm, server) or port in _RTSP_PORTS
-    if status != 401:
-        if device or _looks_like_device("", server):
-            return CredFinding(
-                target=target,
-                service=f"{scheme} ({server or 'device'})",
-                kind="open-no-auth",
-                detail=f"HTTP {status} without authentication",
+
+    if status == 401:
+        if _looks_like_device(realm, server) or port in _RTSP_PORTS:
+            return BruteTarget(
+                host=host,
+                port=port,
+                tls=tls,
+                service=f"{scheme} ({server or realm or 'device'})",
+                is_camera=_is_camera(realm, server) or port in _RTSP_PORTS,
+                login="basic",
             )
         return None
-    if not device:
-        return None
-    return BruteTarget(
-        host=host,
-        port=port,
-        tls=tls,
-        service=f"{scheme} ({server or realm or 'device'})",
-        is_camera=_is_camera(realm, server) or port in _RTSP_PORTS,
-    )
+
+    blob = f"{server} {realm} {body}".lower()
+    if "mikrotik" in blob or "routeros" in blob:
+        return BruteTarget(host=host, port=port, tls=tls, service="RouterOS", login="mikrotik")
+    if "unifi" in server.lower() or ("unifi" in blob and "login" in blob):
+        return BruteTarget(host=host, port=port, tls=tls, service="UniFi", login="unifi")
+    if status == 200 and 'type="password"' in blob and "<form" in blob:
+        return BruteTarget(
+            host=host, port=port, tls=tls, service=f"{scheme} login form", login="form"
+        )
+    if _looks_like_device("", server):
+        return CredFinding(
+            target=target,
+            service=f"{scheme} ({server or 'device'})",
+            kind="open-no-auth",
+            detail=f"HTTP {status} without authentication",
+        )
+    return None
 
 
 async def brute_devices(
@@ -270,7 +284,7 @@ async def brute_devices(
 
         async def run(target: BruteTarget) -> None:
             async with semaphore:
-                hit = await _try_defaults(session, target.url, creds)
+                hit = await _brute_login(session, target, creds)
             if hit is not None:
                 username, password = hit
                 findings.append(
@@ -278,7 +292,7 @@ async def brute_devices(
                         target=target.target,
                         service=target.service,
                         kind="default-creds",
-                        detail="default credentials accepted via HTTP Basic auth",
+                        detail=f"default credentials accepted ({target.login} login)",
                         username=username,
                         password=password,
                     )
@@ -298,6 +312,18 @@ async def brute_devices(
     return findings
 
 
+async def _brute_login(
+    session: aiohttp.ClientSession, target: BruteTarget, creds: tuple[tuple[str, str], ...]
+) -> tuple[str, str] | None:
+    if target.login == "mikrotik":
+        return await _try_mikrotik(session, target.url, creds)
+    if target.login == "unifi":
+        return await _try_unifi(session, target.url, creds)
+    if target.login == "form":
+        return await _try_form(session, target.url, creds)
+    return await _try_defaults(session, target.url, creds)
+
+
 async def _try_defaults(
     session: aiohttp.ClientSession, url: str, creds: tuple[tuple[str, str], ...]
 ) -> tuple[str, str] | None:
@@ -309,5 +335,72 @@ async def _try_defaults(
                     return (username, password)
         except (aiohttp.ClientError, TimeoutError, OSError):
             return None
+        await asyncio.sleep(0.05)
+    return None
+
+
+async def _try_mikrotik(
+    session: aiohttp.ClientSession, base_url: str, creds: tuple[tuple[str, str], ...]
+) -> tuple[str, str] | None:
+    url = base_url.rstrip("/") + "/rest/system/resource"
+    for username, password in creds:
+        try:
+            async with session.get(
+                url, auth=aiohttp.BasicAuth(username, password), allow_redirects=False
+            ) as resp:
+                if resp.status == 200:
+                    return (username, password)
+                if resp.status == 404:
+                    return None
+        except (aiohttp.ClientError, TimeoutError, OSError):
+            return None
+        await asyncio.sleep(0.05)
+    return None
+
+
+async def _try_unifi(
+    session: aiohttp.ClientSession, base_url: str, creds: tuple[tuple[str, str], ...]
+) -> tuple[str, str] | None:
+    endpoints = ("/api/login", "/api/auth/login")
+    for username, password in creds:
+        payload = {"username": username, "password": password}
+        for endpoint in endpoints:
+            url = base_url.rstrip("/") + endpoint
+            try:
+                async with session.post(url, json=payload, allow_redirects=False) as resp:
+                    if resp.status == 200:
+                        return (username, password)
+            except (aiohttp.ClientError, TimeoutError, OSError):
+                continue
+        await asyncio.sleep(0.05)
+    return None
+
+
+_FORM_ENDPOINTS = ("/login", "/", "/admin/login", "/api/login", "/j_security_check")
+
+
+async def _try_form(
+    session: aiohttp.ClientSession, base_url: str, creds: tuple[tuple[str, str], ...]
+) -> tuple[str, str] | None:
+    for username, password in creds:
+        data = {
+            "username": username,
+            "password": password,
+            "user": username,
+            "pass": password,
+            "j_username": username,
+            "j_password": password,
+        }
+        for endpoint in _FORM_ENDPOINTS:
+            url = base_url.rstrip("/") + endpoint
+            try:
+                async with session.post(url, data=data, allow_redirects=False) as resp:
+                    location = resp.headers.get("Location", "").lower()
+                    if resp.status in (301, 302, 303) and not any(
+                        marker in location for marker in ("login", "error", "denied", "auth")
+                    ):
+                        return (username, password)
+            except (aiohttp.ClientError, TimeoutError, OSError):
+                continue
         await asyncio.sleep(0.05)
     return None
