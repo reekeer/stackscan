@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.2] - 2026-07-17
+
+### Added
+
+- `stackscan sigdb` now manages signature sources by type: `add <src> [--type path|web|git]`, `remove`, `enable`, `disable`, `list`. Web sources accept a `.sigdb`, a rules JSON, or a `manifest.json` (which resolves and fetches the compiled sigdb), so a served `db.imalive.lol` database can be added directly.
+
+### Changed
+
+- Rebuild the bundled signature database from the consolidated `db.imalive.lol` category shards.
+
 ## [2.6.1] - 2026-07-17
 
 ### Added
