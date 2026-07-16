@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-07-16
+
+### Added
+
+- Show full social/contact URLs in the report instead of bare handles (e.g. the complete Discord invite link).
+- Update the terminal title with live scan status and ring the terminal bell when the scan finishes (opt out with `--no-bell`).
+- Detect terminal unicode support and use emoji/unicode glyphs (arrow, section markers, status icons) when available, falling back to ASCII otherwise.
+
+### Changed
+
+- Advance the progress bar through long port-scan and subdomain phases (per host and per sub-phase) so it keeps moving instead of sitting still, and show the staged per-target view by default for single-target scans.
+
 ## [2.4.0] - 2026-07-16
 
 ### Added
