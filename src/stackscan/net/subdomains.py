@@ -534,21 +534,23 @@ async def _empty_set() -> set[str]:
     return set()
 
 
-_CT_TIMEOUT = 25
+_CT_TIMEOUT = 15
 
 
 async def _cert_transparency(apex: str) -> set[str]:
-
-    async def safe(coro: Any) -> set[str]:
+    crtsh_names: set[str] = set()
+    for attempt in range(2):
         try:
-            return await coro
+            crtsh_names = await _crtsh(apex)
+            break
         except Exception:
-            return set()
-
-    crtsh_names = await safe(_crtsh(apex))
-    if not crtsh_names:
-        crtsh_names = await safe(_crtsh(apex))
-    certspotter_names = await safe(_certspotter(apex))
+            if attempt == 0:
+                continue
+    certspotter_names: set[str] = set()
+    try:
+        certspotter_names = await _certspotter(apex)
+    except Exception:
+        pass
     return crtsh_names | certspotter_names
 
 
@@ -569,6 +571,8 @@ async def _crtsh(apex: str) -> set[str]:
     timeout = aiohttp.ClientTimeout(total=_CT_TIMEOUT)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(url, headers={"User-Agent": "stackscan"}) as resp:
+            if resp.status >= 500:
+                raise RuntimeError(f"crt.sh {resp.status}")
             if resp.status != 200:
                 return set()
             rows = cast("list[dict[str, Any]]", await resp.json(content_type=None))
