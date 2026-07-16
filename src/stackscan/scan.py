@@ -195,23 +195,27 @@ class ScanOptions:
 
 
 def stage_total(options: ScanOptions) -> int:
-    total = 4
-    if options.subdomains or options.probe:
+    total = 6
+    if options.parse_social:
+        total += 1
+    if options.subdomains:
+        total += 2
+    if options.probe:
         total += 1
     if options.smart_scan or options.ports:
-        total += 1
+        total += 2
     if options.discover_sites:
-        total += 1
+        total += 2
     if options.cve:
+        total += 2
+    if options.cve and options.cve_online:
         total += 1
-    if (
-        options.ip_info
-        or options.default_creds
-        or (options.cve and options.cve_online)
-        or options.whois
-    ):
+    if options.ip_info:
         total += 1
-    total += 1
+    if options.whois:
+        total += 1
+    if options.default_creds:
+        total += 1
     return total
 
 
@@ -250,6 +254,7 @@ async def _resolve_network(host: str, options: ScanOptions, geo: GeoProvider) ->
         geo=geo_map,
         domains=domains,
         dns_ttl=dns.ttl,
+        extras=dns.extras,
     )
 
 
@@ -837,19 +842,16 @@ async def _detect_creds_smart(
 
 
 def _infra_technologies(infra: InfraInfo, host: str) -> list[Technology]:
-    """Convert infrastructure findings into technology rows for the flat table."""
     techs: list[Technology] = []
-    for name in infra.cdn:
+    edge: dict[str, list[str]] = {}
+    for role, names in (("cdn", infra.cdn), ("waf", infra.waf), ("proxy", infra.proxy)):
+        for name in names:
+            edge.setdefault(name, [])
+            if role not in edge[name]:
+                edge[name].append(role)
+    for name, roles in edge.items():
         techs.append(
-            Technology(name=name, categories=("cdn",), evidence=("header",), location=host)
-        )
-    for name in infra.waf:
-        techs.append(
-            Technology(name=name, categories=("waf",), evidence=("header",), location=host)
-        )
-    for name in infra.proxy:
-        techs.append(
-            Technology(name=name, categories=("proxy",), evidence=("header",), location=host)
+            Technology(name=name, categories=("edge",), evidence=tuple(roles), location=host)
         )
     for name in infra.server:
         techs.append(
@@ -920,15 +922,18 @@ async def scan_target(
             report.technologies = _normalize_protocol_techs(report.technologies)
             report.security = analyze_security_headers(fetched.headers)
             report.protocols = _http_protocols(fetched, report.tls)
-            stage("scanning page for secrets & contacts")
+            stage("scanning page for secrets")
             report.secrets = scan_secrets(
                 fetched.body, location=host_of(fetched.url) if fetched else host or ""
             )
             if options.parse_social:
+                stage("extracting social links")
                 report.social = parse_social(fetched.body, fetched.url)
 
-        if (options.subdomains and host) or (options.probe and fetched is not None):
-            stage("enumerating subdomains & probing exposure")
+        if options.subdomains and host:
+            stage("enumerating subdomains")
+        if options.probe and fetched is not None:
+            stage("probing exposure")
         san = report.tls.subject_alt_names if report.tls else ()
         content_hosts: set[str] = (
             hostnames_in_records((fetched.body,), host) if fetched and host else set()
@@ -971,7 +976,7 @@ async def scan_target(
         report.subdomains, report.exposure = await asyncio.gather(sub_coro, exp_coro)
 
         if options.subdomains and report.subdomains:
-            info(f"checking {len(report.subdomains)} subdomain(s) for takeovers")
+            stage(f"checking {len(report.subdomains)} subdomain(s) for takeovers")
             report.takeovers = await detect_takeovers(
                 report.subdomains,
                 session,
@@ -983,7 +988,7 @@ async def scan_target(
         ips = _collect_ips(report)
         cdn_ips: set[str] = set()
         if (options.smart_scan or options.ports) and ips:
-            info("identifying CDN/proxy IPs")
+            stage("identifying CDN/proxy IPs")
             cdn_ips = await _cdn_ips(
                 ips,
                 timeout=min(options.timeout, 8.0),
@@ -1008,13 +1013,14 @@ async def scan_target(
             )
 
         if options.discover_sites:
-            stage("probing derived sites")
+            stage("discovering virtual hosts")
             vhosts = await discover_vhosts(
                 report, session, options, body=fetched.body if fetched else "", cdn_ips=cdn_ips
             )
             if vhosts:
                 report.subdomains.extend(vhosts)
                 report.subdomains.sort(key=lambda sub: sub.name)
+            stage("probing derived sites")
             report.site_findings = await _scan_derived_sites(
                 _collect_site_candidates(report, options.site_limit),
                 session,
@@ -1023,24 +1029,20 @@ async def scan_target(
             )
 
         if options.cve:
-            stage("correlating CVEs")
+            stage("extracting software")
             report.software = extract_software(
                 fetched.headers if fetched else {},
                 fetched.body if fetched else "",
                 location=host_of(fetched.url) if fetched else host,
             )
             report.software.extend(software_from_ports(report.ports))
+            stage("correlating CVEs")
             report.cves = match_cves(
                 _all_software(report), min_confidence=max(0, options.cve_min_confidence)
             )
 
-        if (
-            options.ip_info
-            or options.default_creds
-            or (options.cve and options.cve_online)
-            or (options.whois and host)
-        ):
-            stage("enriching IPs, WHOIS & creds")
+        if options.cve and options.cve_online:
+            stage("querying NVD for CVEs")
         online_coro = (
             match_cves_online(
                 _all_software(report), min_confidence=max(0, options.cve_min_confidence)
@@ -1048,11 +1050,17 @@ async def scan_target(
             if options.cve and options.cve_online
             else _aval([])
         )
+        if options.ip_info:
+            stage("enriching IPs")
         ipinfo_coro = _enrich_unique_ips(report, options) if options.ip_info else _aval([])
+        if options.default_creds:
+            stage("checking default creds")
         empty_creds: tuple[list[CredFinding], list[BruteTarget]] = ([], [])
         creds_coro = (
             _detect_creds(report, host, options) if options.default_creds else _aval(empty_creds)
         )
+        if options.whois and host:
+            stage("looking up WHOIS")
         whois_coro = lookup_whois(host) if options.whois and host else _aval(None)
         online_cves, report.ip_info, creds_result, report.whois = await asyncio.gather(
             online_coro, ipinfo_coro, creds_coro, whois_coro
@@ -1065,8 +1073,9 @@ async def scan_target(
         if options.ip_info:
             report.real_ips = {entry.ip for entry in report.ip_info if not entry.is_cdn}
 
-        stage("classifying services & OS")
+        stage("classifying services")
         report.services = classify_services(report)
+        stage("detecting OS")
         report.os_findings = detect_os(report)
     report.elapsed = perf_counter() - started
     return report
