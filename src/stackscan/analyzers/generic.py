@@ -69,7 +69,7 @@ _NOISE_NAMES: frozenset[str] = frozenset({
 })
 
 _CORE_COMMIT_RE = re.compile(
-    r"([A-Za-z][A-Za-z0-9\s_-]{1,40})\s+Core\s+\(([a-f0-9]{4,})\)", re.IGNORECASE
+    r"([A-Za-z][A-Za-z0-9\s_-]{1,40})\s+Core\s+\(([a-f0-9]{4,})\b\)", re.IGNORECASE
 )
 
 _POWERED_BY_VERSION_RE = re.compile(
@@ -94,7 +94,7 @@ _SERVER_VERSION_RE = re.compile(
 )
 
 _COMMIT_AFTER_NAME_RE = re.compile(
-    r"\b([A-Za-z][A-Za-z0-9\s_-]{1,40})\s+\(?([a-f0-9]{7,40})\)?", re.IGNORECASE
+    r"\b([A-Za-z][A-Za-z0-9\s_-]{1,40})\s+\(?([a-f0-9]{7,40})\b\)?", re.IGNORECASE
 )
 
 
