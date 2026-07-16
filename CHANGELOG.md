@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.3] - 2026-07-17
+
+### Added
+
+- Web-login default-credential checks: MikroTik RouterOS (REST), UniFi (`/api/login`), and generic HTML login forms, in addition to HTTP Basic auth (authorized targets only, same prompts/flags as the device checks).
+
+### Changed
+
+- `stackscan sigdb add` auto-detects the source type (no `--type`) and defaults to `https://db.imalive.lol/sigdb` when no argument is given.
+
+### Removed
+
+- The `--sigdb` flag; manage signatures with `stackscan sigdb` sources instead.
+
 ## [2.6.2] - 2026-07-17
 
 ### Added
