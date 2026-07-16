@@ -43,7 +43,19 @@ class Glyphs:
 
 
 _ASCII = Glyphs(False, "->", ">", "-", "[+]", "[!]", "[x]", "[*]", "[?]", "*", "[~]")
-_UNICODE = Glyphs(True, "→", "▸", "·", "✅", "[!]", "[x]", "ℹ️", "❓", "\U0001f680", "\U0001f50e")
+_UNICODE = Glyphs(
+    True,
+    "→",
+    "▸",
+    "·",
+    "✅",
+    "⚠️",
+    "❌",
+    "ℹ️",
+    "❓",
+    "\U0001f680",
+    "\U0001f50e",
+)
 
 
 def supports_unicode(console: Any | None = None) -> bool:

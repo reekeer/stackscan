@@ -445,7 +445,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
     ) -> ScanReport:
         nonlocal completed
         if args.verbose == 1:
-            err_console.print(f"[{theme.MUTED}][*] Starting scan of {target}...[/]")
+            err_console.print(f"[{theme.MUTED}]{_glyphs().run} Starting scan of {target}...[/]")
 
         stage_log: StageLog | None = None
         if staged and progress_obj is not None and task_id is not None:
@@ -485,7 +485,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         summary_str = ", ".join(findings)
         if args.verbose == 1:
             err_console.print(
-                f"[{theme.SUCCESS}][+][/] [{completed}/{total_targets}] Finished {target} in {_fmt_elapsed(report.elapsed or 0)} ({summary_str})",
+                f"[{theme.SUCCESS}]{_glyphs().ok}[/] [{completed}/{total_targets}] Finished {target} in {_fmt_elapsed(report.elapsed or 0)} ({summary_str})",
                 highlight=False,
             )
 
