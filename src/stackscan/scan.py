@@ -171,11 +171,11 @@ class ScanOptions:
     probe: bool = True
     probe_404: bool = True
     cve: bool = True
-    cve_online: bool = False
+    cve_online: bool = True
     cve_min_confidence: int = 0
-    parse_social: bool = False
-    ports: bool = False
-    subdomains: bool = False
+    parse_social: bool = True
+    ports: bool = True
+    subdomains: bool = True
     hide_unresolved: bool = False
     ip_info: bool = True
     default_creds: bool = False

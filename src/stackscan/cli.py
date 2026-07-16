@@ -72,13 +72,6 @@ def _build_scan_parser() -> argparse.ArgumentParser:
         help='Skip passes by name, e.g. --disable "dns,tls,geo,probe,cve,ip-info,nmap".',
     )
     parser.add_argument(
-        "--parse",
-        dest="parse",
-        default="",
-        metavar="LIST",
-        help='Enable scan modules, e.g. --parse "subdomains,ports,creds,cve-online" or --parse all.',
-    )
-    parser.add_argument(
         "--parse-social",
         dest="parse_social",
         action="store_true",
@@ -233,25 +226,11 @@ _DISABLE_MAP: dict[str, str] = {
     "creds": "no_creds",
     "default-creds": "no_creds",
     "cve-online": "no_cve_online",
+    "social": "no_parse_social",
+    "socials": "no_parse_social",
     "ct": "no_ct",
     "crt": "no_ct",
     "passive": "no_ct",
-}
-
-
-_PARSE_MAP: dict[str, str] = {
-    "subdomains": "subdomains",
-    "subdomain": "subdomains",
-    "social": "parse_social",
-    "socials": "parse_social",
-    "ports": "ports",
-    "port": "ports",
-    "creds": "default_creds",
-    "cred": "default_creds",
-    "default-creds": "default_creds",
-    "cve-online": "cve_online",
-    "cveonline": "cve_online",
-    "all": "all",
 }
 
 
@@ -271,25 +250,6 @@ def _apply_disable(args: argparse.Namespace, console: Console) -> None:
             )
             continue
         setattr(args, attr, True)
-
-
-def _apply_parse(args: argparse.Namespace, console: Console) -> None:
-    for token in args.parse.replace(" ", ",").split(","):
-        token = token.strip().lower().lstrip("-")
-        if not token:
-            continue
-        attr = _PARSE_MAP.get(token)
-        if attr is None:
-            _warn(
-                console,
-                f"unknown --parse module: {token} (known: {', '.join(sorted(_PARSE_MAP))})",
-            )
-            continue
-        if attr == "all":
-            for a in ("subdomains", "parse_social", "ports", "default_creds", "cve_online"):
-                setattr(args, a, True)
-        else:
-            setattr(args, attr, True)
 
 
 def _read_targets(path: Path | None, positional: Iterable[str]) -> list[str]:
@@ -405,11 +365,11 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         probe=not args.no_probe,
         probe_404=not args.no_404_probe,
         cve=not args.no_cve,
-        cve_online=args.cve_online and (not getattr(args, "no_cve_online", False)),
+        cve_online=not args.no_cve_online,
         cve_min_confidence=max(0, min(100, args.cve_min_confidence)),
-        parse_social=args.parse_social,
-        ports=(args.ports or full) and (not getattr(args, "no_ports", False)),
-        subdomains=(args.subdomains or full) and (not getattr(args, "no_subdomains", False)),
+        parse_social=not args.no_parse_social,
+        ports=not args.no_ports,
+        subdomains=not args.no_subdomains,
         hide_unresolved=args.hide_unresolved,
         ip_info=not args.no_ip_info,
         default_creds=(args.default_creds or full or args.full_auto)
@@ -809,7 +769,6 @@ def _scan_command(argv: list[str]) -> int:
     args.verbose = verbose_level
     err_console = Console(stderr=True)
     _apply_disable(args, err_console)
-    _apply_parse(args, err_console)
     if not getattr(args, "no_banner", False):
         render_banner(err_console)
     if (args.ports or args.full) and (not getattr(args, "no_nmap", False)) and (not nmap_available()):
