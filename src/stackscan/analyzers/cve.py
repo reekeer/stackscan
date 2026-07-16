@@ -281,11 +281,12 @@ _SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
 
 def _confidence(version: str, rng: dict[str, str], source: str, backported: bool = False) -> int:
     if backported:
-        # A range that pins the vulnerable window (has a start bound) is more
-        # useful than a vague "before X" range for distro backports.
+        # Distro backports are a common source of phantom CVEs because the
+        # banner version does not reveal the patchlevel. Keep them below the
+        # default confidence threshold so they only appear when explicitly asked.
         if "start_incl" in rng or "start_excl" in rng:
-            return 60
-        return 30
+            return 45
+        return 25
     comps = len([c for c in re.split("[.\\-_]", version) if c[:1].isdigit()])
     bounded = ("start_incl" in rng or "start_excl" in rng) and (
         "end_incl" in rng or "end_excl" in rng
