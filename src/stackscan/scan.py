@@ -280,6 +280,28 @@ def _merge_technologies(primary: list[Technology], extra: list[Technology]) -> l
     return sorted(by_name.values(), key=lambda t: t.name.lower())
 
 
+_PROTOCOL_NAMES: frozenset[str] = frozenset(
+    {"http/3", "http/3 (alt-svc)", "http/2", "http/2 (alpn)", "http/1.1", "quic", "websocket"}
+)
+
+
+def _normalize_protocol_techs(technologies: list[Technology]) -> list[Technology]:
+    """Ensure protocol-like findings are categorised as protocols, not services."""
+    out: list[Technology] = []
+    for tech in technologies:
+        if tech.name.lower() in _PROTOCOL_NAMES:
+            tech = Technology(
+                name=tech.name,
+                categories=("protocol",),
+                evidence=tech.evidence,
+                location=tech.location,
+                confidence=tech.confidence,
+                version=tech.version,
+            )
+        out.append(tech)
+    return out
+
+
 def _merge_software(primary: list[Software], extra: list[Software]) -> list[Software]:
     seen: set[tuple[str, str | None]] = {(s.name.lower(), s.version) for s in primary}
     merged = list(primary)
@@ -338,6 +360,7 @@ async def _scan_site(
 
     infra = analyze_infra(fetched.headers, tuple(fetched.cookies), host)
     technologies = _merge_technologies(technologies, _infra_technologies(infra, site_host))
+    technologies = _normalize_protocol_techs(technologies)
 
     return SiteFinding(
         url=url,
@@ -807,6 +830,7 @@ async def scan_target(
             report.technologies = _merge_technologies(
                 report.technologies, _infra_technologies(report.infra, host_of(fetched.url))
             )
+            report.technologies = _normalize_protocol_techs(report.technologies)
             report.security = analyze_security_headers(fetched.headers)
             report.protocols = _http_protocols(fetched, report.tls)
             report.secrets = scan_secrets(
