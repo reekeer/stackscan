@@ -4,69 +4,73 @@ import re
 
 from stackscan.types import Software, Technology
 
-SERVER_NAMES: frozenset[str] = frozenset({
-    "nginx",
-    "apache",
-    "httpd",
-    "lighttpd",
-    "litespeed",
-    "caddy",
-    "openresty",
-    "iis",
-    "microsoft-iis",
-    "cherokee",
-    "h2o",
-    "boa",
-    "thttpd",
-    "mini_httpd",
-    "rejetto",
-    "cowboy",
-    "tornado",
-    "gunicorn",
-    "uwsgi",
-    "jetty",
-    "tomcat",
-    "apache tomcat",
-    "websphere",
-    "glassfish",
-    "play",
-    "spray",
-    "kestrel",
-    "cassini",
-    "kangle",
-    "resin",
-    "weblogic",
-    "zope",
-    "aolserver",
-    "yaws",
-})
+SERVER_NAMES: frozenset[str] = frozenset(
+    {
+        "nginx",
+        "apache",
+        "httpd",
+        "lighttpd",
+        "litespeed",
+        "caddy",
+        "openresty",
+        "iis",
+        "microsoft-iis",
+        "cherokee",
+        "h2o",
+        "boa",
+        "thttpd",
+        "mini_httpd",
+        "rejetto",
+        "cowboy",
+        "tornado",
+        "gunicorn",
+        "uwsgi",
+        "jetty",
+        "tomcat",
+        "apache tomcat",
+        "websphere",
+        "glassfish",
+        "play",
+        "spray",
+        "kestrel",
+        "cassini",
+        "kangle",
+        "resin",
+        "weblogic",
+        "zope",
+        "aolserver",
+        "yaws",
+    }
+)
 
 # Product names we never want to emit as a generic technology/software hit.
-_NOISE_NAMES: frozenset[str] = frozenset({
-    "http",
-    "https",
-    "www",
-    "html",
-    "css",
-    "json",
-    "xml",
-    "js",
-    "png",
-    "jpg",
-    "jpeg",
-    "gif",
-    "svg",
-    "ico",
-    "woff",
-    "woff2",
-    "ttf",
-    "eot",
-    "php",
-    "asp",
-    "aspx",
-    "jsp",
-    "cgi",
-})
+_NOISE_NAMES: frozenset[str] = frozenset(
+    {
+        "http",
+        "https",
+        "www",
+        "html",
+        "css",
+        "json",
+        "xml",
+        "js",
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "svg",
+        "ico",
+        "woff",
+        "woff2",
+        "ttf",
+        "eot",
+        "php",
+        "asp",
+        "aspx",
+        "jsp",
+        "cgi",
+    }
+)
 
 _CORE_COMMIT_RE = re.compile(
     r"([A-Za-z][A-Za-z0-9\s_-]{1,40})\s+Core\s+\(([a-f0-9]{4,})\b\)", re.IGNORECASE
@@ -94,12 +98,57 @@ _SERVER_VERSION_RE = re.compile(
 )
 
 _COMMIT_AFTER_NAME_RE = re.compile(
-    r"\b([A-Za-z][A-Za-z0-9\s_-]{1,40})\s+\(?([a-f0-9]{7,40})\b\)?", re.IGNORECASE
+    r"\b([A-Za-z][A-Za-z0-9._-]{1,40})\s+\(([a-f0-9]{7,40})\)", re.IGNORECASE
 )
+
+_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "and",
+        "or",
+        "the",
+        "a",
+        "an",
+        "with",
+        "for",
+        "to",
+        "of",
+        "in",
+        "on",
+        "our",
+        "your",
+        "my",
+        "this",
+        "that",
+        "is",
+        "are",
+        "was",
+        "were",
+        "by",
+        "from",
+        "using",
+        "use",
+        "plus",
+        "via",
+    }
+)
+
+
+_VERSION_TOKEN_RE = re.compile(r"^v?\d[\w.]*$", re.IGNORECASE)
 
 
 def _normalize_name(name: str) -> str:
     return " ".join(name.split()).strip()
+
+
+def _clean_product_name(name: str) -> str:
+    kept: list[str] = []
+    for word in _normalize_name(name).split():
+        if word.lower() in _STOPWORDS:
+            break
+        kept.append(word)
+    while len(kept) > 1 and _VERSION_TOKEN_RE.match(kept[-1]):
+        kept.pop()
+    return " ".join(kept)
 
 
 def _software_name(name: str) -> str:
@@ -131,17 +180,11 @@ def is_commit_hash(value: str) -> bool:
 
 
 def extract_generic_tech(body: str) -> list[Technology]:
-    """Return generic service/infrastructure technologies found in the body.
-
-    This is meant to catch products and commit hashes that do not have a
-    dedicated signature in the bundled database, e.g. a 404 page footer that
-    says ``nginx/1.24.0`` or ``CurseForge Core (a26fded)``.
-    """
     hits: list[tuple[str, str, str, str | None]] = []
     seen: set[tuple[str, str | None]] = set()
 
     def remember(name: str, evidence: str, version: str | None) -> None:
-        name = _normalize_name(name)
+        name = _clean_product_name(name)
         if len(name) < 2 or _is_noise(name) or not _is_plausible_name(name):
             return
         key = (name.lower(), version)
@@ -155,13 +198,17 @@ def extract_generic_tech(body: str) -> list[Technology]:
         version = match.group(2)
         remember(name, f"body:{name}/{version}", version)
 
+    powered_starts: set[int] = set()
     for match in _POWERED_BY_VERSION_RE.finditer(body):
         name = _normalize_name(match.group(1))
         version = match.group(2)
+        powered_starts.add(match.start())
         if name and not _is_noise(name):
             remember(name, f"body:powered-by {name} {version}", version)
 
     for match in _POWERED_BY_PLAIN_RE.finditer(body):
+        if match.start() in powered_starts:
+            continue
         name = _normalize_name(match.group(1))
         if name and not _is_noise(name):
             remember(name, f"body:powered-by {name}", None)
@@ -181,14 +228,12 @@ def extract_generic_tech(body: str) -> list[Technology]:
                 return True
         return False
 
-    # Product name directly followed by a short hex commit (no "Core" keyword).
     for match in _COMMIT_AFTER_NAME_RE.finditer(body):
         if _overlaps_core(match.span()):
             continue
         name = _normalize_name(match.group(1))
         commit = match.group(2).lower()
         if name and not _is_noise(name) and is_commit_hash(commit):
-            # Prefer the Core match if we already have one for the same product.
             if (name.lower(), commit) not in seen:
                 remember(name, f"body:{name} ({commit})", commit)
 
@@ -205,12 +250,11 @@ def extract_generic_tech(body: str) -> list[Technology]:
 
 
 def extract_generic_software(body: str, location: str = "") -> list[Software]:
-    """Return Software records for generic product/version/commit patterns."""
     out: list[Software] = []
     seen: set[tuple[str, str | None]] = set()
 
     def add(name: str, version: str | None, evidence: str) -> None:
-        name = _normalize_name(name)
+        name = _clean_product_name(name)
         if len(name) < 2 or not _is_plausible_name(name):
             return
         sname = _software_name(name)
@@ -234,13 +278,17 @@ def extract_generic_software(body: str, location: str = "") -> list[Software]:
         version = match.group(2)
         add(name, version, f"body:{name}/{version}")
 
+    powered_starts: set[int] = set()
     for match in _POWERED_BY_VERSION_RE.finditer(body):
         name = _normalize_name(match.group(1))
         version = match.group(2)
+        powered_starts.add(match.start())
         if name:
             add(name, version, f"body:powered-by {name} {version}")
 
     for match in _POWERED_BY_PLAIN_RE.finditer(body):
+        if match.start() in powered_starts:
+            continue
         name = _normalize_name(match.group(1))
         if name:
             add(name, None, f"body:powered-by {name}")

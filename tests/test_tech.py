@@ -222,3 +222,25 @@ def test_detects_generic_commit_without_core_keyword(tmp_path: Path) -> None:
     techs = {tech.name: tech for tech in analyzer.detect(result)}
     assert "CurseForge" in techs
     assert techs["CurseForge"].version == "a26fded"
+
+
+def test_generic_ignores_crypto_token_as_commit() -> None:
+    from stackscan.analyzers.generic import extract_generic_software, extract_generic_tech
+
+    body = "signed by channel with SHA-256 validation and ed25519 signatures"
+    assert extract_generic_tech(body) == []
+    assert extract_generic_software(body) == []
+
+
+def test_generic_truncates_prose_at_stopword() -> None:
+    from stackscan.analyzers.generic import extract_generic_tech
+
+    names = {tech.name for tech in extract_generic_tech("Built with Nuxt and the LeavePulse UI")}
+    assert names == {"Nuxt"}
+
+
+def test_generic_powered_by_keeps_single_versioned_hit() -> None:
+    from stackscan.analyzers.generic import extract_generic_tech
+
+    techs = extract_generic_tech("Powered by CurseForge v2.11.4")
+    assert [(t.name, t.version) for t in techs] == [("CurseForge", "2.11.4")]
