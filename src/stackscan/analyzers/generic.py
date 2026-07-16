@@ -116,6 +116,11 @@ def _is_noise(name: str) -> bool:
     return _software_name(name) in _NOISE_NAMES
 
 
+def _is_plausible_name(name: str) -> bool:
+    """Reject single-letter-plus-digit noise (e.g. SVG path commands like M368)."""
+    return sum(1 for ch in name if ch.isalpha()) >= 2
+
+
 def is_commit_hash(value: str) -> bool:
     """Return True when value looks like a Git commit hash rather than a version."""
     if len(value) < 7:
@@ -137,7 +142,7 @@ def extract_generic_tech(body: str) -> list[Technology]:
 
     def remember(name: str, evidence: str, version: str | None) -> None:
         name = _normalize_name(name)
-        if len(name) < 2 or _is_noise(name):
+        if len(name) < 2 or _is_noise(name) or not _is_plausible_name(name):
             return
         key = (name.lower(), version)
         if key in seen:
@@ -206,7 +211,7 @@ def extract_generic_software(body: str, location: str = "") -> list[Software]:
 
     def add(name: str, version: str | None, evidence: str) -> None:
         name = _normalize_name(name)
-        if len(name) < 2:
+        if len(name) < 2 or not _is_plausible_name(name):
             return
         sname = _software_name(name)
         if sname in _NOISE_NAMES:
