@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-07-16
+
+### Added
+
+- WHOIS/RDAP now reports nameservers, DNSSEC status, the last-changed date, and the registrar URL.
+- DNS resolution now queries HTTPS, SVCB, and DS records and surfaces them in terminal and HTML reports.
+- Verbose scans (`-v`) now use the staged per-target progress view with more granular stage labels.
+
+### Changed
+
+- Technologies table now shows the target host for edge/CDN/WAF/proxy entries instead of `-`.
+- Scan pipeline is split into finer stages (social links, takeovers, CDN detection, virtual hosts, software extraction, IP/WHOIS/creds enrichment, service/OS classification) so the progress bar updates more often.
+- Removed the unicode spinner from progress bars to avoid rendering issues in some terminals.
+
+### Removed
+
+- Dropped the Infrastructure, Security headers, and Hosts & OS sections from the terminal report.
+- Dropped the Infrastructure and Hosts & OS sections from the HTML export.
+
 ## [2.5.0] - 2026-07-16
 
 ### Added
@@ -136,6 +155,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release of stackscan.
 - Project configuration and dependency lock.
 
+[2.6.0]: https://github.com/reekeer/stackscan/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/reekeer/stackscan/compare/v2.4.0...v2.5.0
+[2.4.0]: https://github.com/reekeer/stackscan/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/reekeer/stackscan/compare/v2.2.2...v2.3.0
 [2.2.2]: https://github.com/reekeer/stackscan/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/reekeer/stackscan/compare/v2.2.0...v2.2.1

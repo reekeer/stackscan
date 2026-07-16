@@ -2,4 +2,4 @@ from .core import StackscanSession
 from .utils import normalize_url
 
 __all__ = ["StackscanSession", "__version__", "normalize_url"]
-__version__ = "2.5.0"
+__version__ = "2.6.0"
