@@ -468,6 +468,27 @@ def _parent_zhosts(name: str, apex: str) -> list[str]:
     return out
 
 
+def _is_default_vhost_redirect(
+    name: str, status: int, location: str, baseline_status: int | None = None
+) -> bool:
+    """Ignore default-server redirects that simply mirror the Host header.
+
+    If the baseline response is an error, a redirect to the vhost may be a
+    real virtual host forcing HTTPS, so we keep it.
+    """
+    if status not in (301, 302, 307, 308):
+        return False
+    if baseline_status is not None and baseline_status >= 400:
+        return False
+    loc = location.lower().strip()
+    if not loc:
+        return False
+    for prefix in (f"http://{name.lower()}/", f"https://{name.lower()}/", f"//{name.lower()}/"):
+        if loc.startswith(prefix):
+            return True
+    return False
+
+
 async def _probe_vhost(
     session: StackscanSession,
     ip: str,
@@ -478,7 +499,7 @@ async def _probe_vhost(
     timeout: float,
     max_bytes: int,
     baseline_status: int | None,
-) -> tuple[str, int | None, str]:
+) -> tuple[str, int | None, str, str]:
     try:
         result = await session.fetch(
             _http_url(ip, port, tls),
@@ -487,12 +508,13 @@ async def _probe_vhost(
             insecure=True,
             max_bytes=max_bytes,
             headers={"Host": name},
+            allow_redirects=False,
         )
     except Exception:
-        return (name, None, "")
+        return (name, None, "", "")
     body = result.body.lower()
     location = result.headers.get("location", "")
-    return (name, result.status, location + body[:512])
+    return (name, result.status, location, location + body[:512])
 
 
 async def _vhost_baselines(
@@ -501,23 +523,37 @@ async def _vhost_baselines(
     user_agent: str,
     timeout: float,
     max_bytes: int,
-) -> dict[tuple[str, int, bool], tuple[int | None, str]]:
+) -> dict[tuple[str, int, bool], tuple[int | None, str, str | None]]:
     semaphore = asyncio.Semaphore(10)
 
-    async def one(target: tuple[str, int, bool]) -> tuple[tuple[str, int, bool], tuple[int | None, str]]:
+    async def one(
+        target: tuple[str, int, bool],
+    ) -> tuple[tuple[str, int, bool], tuple[int | None, str, str | None]]:
         ip, port, tls = target
+        url = _http_url(ip, port, tls)
         async with semaphore:
             try:
                 result = await session.fetch(
-                    _http_url(ip, port, tls),
+                    url,
                     timeout=timeout,
                     user_agent=user_agent,
                     insecure=True,
                     max_bytes=max_bytes,
+                    allow_redirects=False,
                 )
             except Exception:
-                return (target, (None, ""))
-            return (target, (result.status, result.body.lower()[:512]))
+                return (target, (None, "", None))
+            block = detect_isp_block(
+                url,
+                FetchResult(
+                    url=result.url,
+                    status=result.status,
+                    headers=result.headers,
+                    body=result.body,
+                    cookies=result.cookies,
+                ),
+            )
+            return (target, (result.status, result.body.lower()[:512], block))
 
     results = await asyncio.gather(*(one(t) for t in targets))
     return dict(results)
@@ -571,10 +607,10 @@ async def discover_vhosts(
     ) -> tuple[str, tuple[str, ...]] | None:
         ip, port, tls = target
         baseline = baselines.get(target)
-        if baseline is None or baseline[0] is None:
+        if baseline is None or baseline[0] is None or baseline[2] is not None:
             return None
         async with semaphore:
-            vname, status, indicator = await _probe_vhost(
+            vname, status, location, indicator = await _probe_vhost(
                 session,
                 ip,
                 port,
@@ -587,6 +623,13 @@ async def discover_vhosts(
             )
         if status is None:
             return None
+        if _is_default_vhost_redirect(vname, status, location, baseline[0]):
+            return None
+        # Treat rate-limit / WAF / transient errors as non-matches when the
+        # baseline was a normal page. They are not reliable vhost indicators.
+        if 200 <= baseline[0] < 400:
+            if status in (429, 503, 502, 403, 451):
+                return None
         if status != baseline[0] or vname.lower() in indicator or vname.replace(".", "-") in indicator:
             return (vname, (ip,))
         return None
