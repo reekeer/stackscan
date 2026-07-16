@@ -292,7 +292,7 @@ def _tls_section(report: ScanReport) -> RenderableType | None:
     return grid
 
 
-_EDGE_CATEGORIES: frozenset[str] = frozenset({"edge", "cdn", "waf", "proxy"})
+_GLOBAL_CATEGORIES: frozenset[str] = frozenset({"edge", "cdn", "waf", "proxy", "protocol"})
 
 
 def _tech_section(report: ScanReport) -> RenderableType | None:
@@ -302,9 +302,9 @@ def _tech_section(report: ScanReport) -> RenderableType | None:
     seen: set[tuple[str, str | None, str]] = set()
 
     def _add_row(name: str, version: str | None, category: str, host: str, confidence: int) -> None:
-        is_edge = any(cat in _EDGE_CATEGORIES for cat in category.split(", "))
+        global_cat = any(cat in _GLOBAL_CATEGORIES for cat in category.split(", "))
         host_cell = host or primary or "-"
-        if is_edge:
+        if global_cat:
             key = (name.lower(), version, "")
         else:
             key = (name.lower(), version, host)
