@@ -141,6 +141,32 @@ def test_match_cves_marks_ubuntu_banner_unconfirmed() -> None:
     assert not any(c.severity == "CRITICAL" and not c.unconfirmed for c in cves)
 
 
+def test_backport_cves_hidden_at_default_threshold() -> None:
+    # Distro-backported / SSH banner matches are phantom CVEs by default: they
+    # must fall below the CLI default of --cve-min-confidence 40 so they never
+    # surface unless the user explicitly asks for a lower threshold.
+    software = extract_software({"server": "nginx/1.24.0 (Ubuntu)"}, "")
+    assert match_cves(software)
+    assert match_cves(software, min_confidence=40) == []
+
+
+def test_backport_ssh_cves_hidden_at_default_threshold() -> None:
+    scan = PortScan(
+        scanner="nmap",
+        ports=(
+            Port(
+                port=22,
+                service="ssh",
+                product="OpenSSH",
+                version="9.6p1 Ubuntu 3ubuntu13.18 (Ubuntu Linux; protocol 2.0)",
+            ),
+        ),
+    )
+    software = software_from_ports(scan)
+    assert match_cves(software)
+    assert match_cves(software, min_confidence=40) == []
+
+
 def test_match_cves_clean_upstream_keeps_normal_confidence() -> None:
     software = extract_software({"server": "nginx/1.18.0"}, "")
     cves = match_cves(software)
@@ -223,7 +249,9 @@ def test_software_from_ports_flags_distro_backports_for_any_service() -> None:
         ), f"expected {expected} in os for {product} {version}, got {[s.os for s in software]}"
         cves = match_cves(software)
         if cves:
-            assert all(c.unconfirmed for c in cves), f"CVEs for {product} {version} should be unconfirmed"
+            assert all(
+                c.unconfirmed for c in cves
+            ), f"CVEs for {product} {version} should be unconfirmed"
             assert all(
                 c.confidence <= 60 for c in cves
             ), f"CVE confidence for {product} {version} should be capped at 60"

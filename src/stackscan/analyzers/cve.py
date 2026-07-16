@@ -281,12 +281,14 @@ _SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
 
 def _confidence(version: str, rng: dict[str, str], source: str, backported: bool = False) -> int:
     if backported:
-        # Distro backports are a common source of phantom CVEs because the
-        # banner version does not reveal the patchlevel. Keep them below the
-        # default confidence threshold so they only appear when explicitly asked.
+        # Distro backports (and SSH banners in particular) are the main source
+        # of phantom CVEs: the banner version never reveals the vendor
+        # patchlevel, so a "vulnerable" range match is usually already fixed.
+        # Keep them below the default --cve-min-confidence (40) so they stay
+        # hidden unless the user explicitly lowers the threshold.
         if "start_incl" in rng or "start_excl" in rng:
-            return 45
-        return 25
+            return 35
+        return 20
     comps = len([c for c in re.split("[.\\-_]", version) if c[:1].isdigit()])
     bounded = ("start_incl" in rng or "start_excl" in rng) and (
         "end_incl" in rng or "end_excl" in rng
