@@ -5,11 +5,13 @@ import asyncio
 import json
 import sys
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
+from rich.progress import Progress
 from rich.table import Table
 
 from stackscan import __version__, theme
@@ -17,7 +19,7 @@ from stackscan.analyzers import TechAnalyzer, brute_devices
 from stackscan.config import NoSignaturesError, SourceError, SourceStore, build_matchers
 from stackscan.net import GeoProvider, nmap_available
 from stackscan.render import render_banner, render_reports
-from stackscan.scan import ScanOptions, scan_target
+from stackscan.scan import ScanOptions, StageLog, scan_target
 from stackscan.types import BruteTarget, CredFinding, DetectedTech, ScanReport
 from stackscan.utils import expand_cidr, is_cidr, normalize_url
 
@@ -339,6 +341,30 @@ async def _expand_wildcards(raw_targets: list[str], workers: int) -> list[str]:
     return out
 
 
+class _StageTracker:
+    """Progress logger: stage() advances the bar, info() only updates the label."""
+
+    def __init__(self, progress_obj: Progress, task_id: Any, target: str) -> None:
+        self._progress = progress_obj
+        self._task_id = task_id
+        self._target = target
+        self._index = 0
+
+    def stage(self, message: str) -> None:
+        self._index += 1
+        self._progress.update(
+            self._task_id,
+            advance=1,
+            description=f"[~] {self._target} · {message}",
+        )
+
+    def info(self, message: str) -> None:
+        self._progress.update(
+            self._task_id,
+            description=f"[~] {self._target} · {message}",
+        )
+
+
 async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
     from stackscan.core import StackscanSession
 
@@ -393,12 +419,9 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         discover_sites=full,
         site_limit=max(args.site_limit, 0),
     )
-    from typing import Any
-
     from rich.progress import (
         BarColumn,
         MofNCompleteColumn,
-        Progress,
         SpinnerColumn,
         TextColumn,
         TimeElapsedColumn,
@@ -418,21 +441,10 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         if args.verbose == 1:
             err_console.print(f"[{theme.MUTED}][*] Starting scan of {target}...[/]")
 
-        stage_log: Callable[[str], None] | None = None
+        stage_log: StageLog | None = None
         if args.verbose >= 2 and progress_obj is not None and task_id is not None:
-            stage_index = 0
-
-            def _stage_log(message: str, _t: str = target) -> None:
-                nonlocal stage_index
-                stage_index += 1
-                progress_obj.update(
-                    task_id,
-                    advance=1,
-                    description=f"[~] {_t} · {message}",
-                )
-
-            stage_log = _stage_log
-            progress_obj.update(task_id, description=f"[~] {target} · starting...")
+            stage_log = _StageTracker(progress_obj, task_id, target)
+            stage_log.info("starting...")
 
         report = await scan_target(
             target,
@@ -595,7 +607,7 @@ def _payload(
         "results": [report.to_dict() for report in reports],
     }
     if include_graph:
-        from typing import Any, cast
+        from typing import cast
 
         from stackscan.export import build_graph
 

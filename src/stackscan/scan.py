@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from urllib.parse import urljoin
 
 from stackscan.analyzers import (
@@ -153,6 +152,11 @@ def _http_protocols(fetched: FetchResult, tls: TlsInfo | None) -> list[str]:
     if "h3" in alt_svc:
         protocols.append("HTTP/3 (Alt-Svc)")
     return protocols
+
+
+class StageLog(Protocol):
+    def stage(self, message: str) -> None: ...
+    def info(self, message: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -657,7 +661,7 @@ async def _scan_ports_on_ips(
     ips: set[str],
     options: ScanOptions,
     cdn_ips: set[str] | None = None,
-    log: Callable[[str], None] | None = None,
+    log: StageLog | None = None,
 ) -> tuple[PortScan | None, dict[str, PortScan]]:
     cdn_ips = cdn_ips or set()
     ips = {ip for ip in ips if ip not in cdn_ips}
@@ -668,7 +672,7 @@ async def _scan_ports_on_ips(
 
     async def one(ip: str, index: int) -> tuple[str, PortScan]:
         if log is not None:
-            log(f"scanning ports on {ip} ({index}/{total})")
+            log.info(f"scanning ports on {ip} ({index}/{total})")
         async with semaphore:
             scan = await scan_ports(
                 ip,
@@ -789,7 +793,7 @@ async def scan_target(
     options: ScanOptions,
     geo: GeoProvider,
     semaphore: asyncio.Semaphore,
-    log: Callable[[str], None] | None = None,
+    log: StageLog | None = None,
 ) -> ScanReport:
     host = host_of(url)
     report = ScanReport(url=url)
@@ -797,7 +801,11 @@ async def scan_target(
 
     def stage(message: str) -> None:
         if log is not None:
-            log(message)
+            log.stage(message)
+
+    def info(message: str) -> None:
+        if log is not None:
+            log.info(message)
 
     async with semaphore:
         stage("resolving DNS & fetching page")
@@ -839,13 +847,10 @@ async def scan_target(
             if options.parse_social:
                 report.social = parse_social(fetched.body, fetched.url)
 
-        if (options.subdomains and host) or (options.probe and fetched is not None):
-            bits: list[str] = []
-            if options.subdomains and host:
-                bits.append("enumerating subdomains")
-            if options.probe and fetched is not None:
-                bits.append("probing exposure")
-            stage(" & ".join(bits))
+        if options.subdomains and host:
+            stage("enumerating subdomains")
+        elif options.probe and fetched is not None:
+            stage("probing exposure")
         san = report.tls.subject_alt_names if report.tls else ()
         content_hosts: set[str] = (
             hostnames_in_records((fetched.body,), host) if fetched and host else set()
@@ -898,11 +903,11 @@ async def scan_target(
                 workers=max(options.workers // 10, 4),
             )
             if cdn_ips:
-                stage(f"skipping {len(cdn_ips)} CDN/proxy IP(s)")
+                info(f"skipping {len(cdn_ips)} CDN/proxy IP(s)")
 
         if options.smart_scan:
             stage(f"scanning ports on {len(ips - cdn_ips)} host(s)")
-            report.ports, _ = await _scan_ports_on_ips(ips, options, cdn_ips=cdn_ips, log=stage)
+            report.ports, _ = await _scan_ports_on_ips(ips, options, cdn_ips=cdn_ips, log=log)
         elif options.ports and host:
             stage("scanning ports")
             report.ports = await scan_ports(
@@ -940,7 +945,7 @@ async def scan_target(
             )
 
         if options.ip_info or options.default_creds or (options.cve and options.cve_online):
-            stage("IP intelligence & default-cred checks")
+            stage("enriching IPs & creds")
         online_coro = (
             match_cves_online(
                 _all_software(report), min_confidence=max(0, options.cve_min_confidence)
