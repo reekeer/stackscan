@@ -746,17 +746,39 @@ def _brute_subject(cameras: int, devices: int) -> str:
     return " and ".join(parts) if parts else "device(s)"
 
 
+def _prompt_line(console: Console) -> str | None:
+    console.print("> ", end="")
+    try:
+        console.file.flush()
+    except Exception:
+        pass
+    tty = None
+    try:
+        tty = open("/dev/tty", encoding="utf-8", errors="replace")
+    except OSError:
+        tty = None
+    stream = tty if tty is not None else sys.stdin
+    try:
+        line = stream.readline()
+    except (OSError, EOFError, KeyboardInterrupt):
+        line = ""
+    finally:
+        if tty is not None:
+            tty.close()
+    return line if line else None
+
+
 def _prompt_brute(cameras: int, devices: int, console: Console) -> bool:
     console.print(
-        f"[{theme.WARN}][?][/] Parser found {_brute_subject(cameras, devices)}."
-        " Try to brute? Y(Yes)/N(No)",
+        f"[{theme.WARN}]{_glyphs().ask}[/] Parser found {_brute_subject(cameras, devices)}."
+        " Try to brute? [Y]es / [N]o",
         highlight=False,
     )
     while True:
-        try:
-            answer = input("> ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
+        answer = _prompt_line(console)
+        if answer is None:
             return False
+        answer = answer.strip().lower()
         if answer in ("y", "yes"):
             return True
         if answer in ("n", "no", ""):
