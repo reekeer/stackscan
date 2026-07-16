@@ -105,6 +105,34 @@ class InfraInfo:
 
 
 @dataclass(frozen=True)
+class WhoisInfo:
+    domain: str
+    registrar: str | None = None
+    registrant: str | None = None
+    registrant_public: bool = False
+    privacy: str = ""
+    created: str | None = None
+    updated: str | None = None
+    expires: str | None = None
+    statuses: tuple[str, ...] = ()
+    source: str = "rdap"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "domain": self.domain,
+            "registrar": self.registrar,
+            "registrant": self.registrant,
+            "registrant_public": self.registrant_public,
+            "privacy": self.privacy,
+            "created": self.created,
+            "updated": self.updated,
+            "expires": self.expires,
+            "statuses": list(self.statuses),
+            "source": self.source,
+        }
+
+
+@dataclass(frozen=True)
 class SecurityHeaders:
     present: dict[str, str] = field(default_factory=dict[str, str])
     missing: tuple[str, ...] = ()
@@ -433,6 +461,7 @@ class ScanReport:
     services: list[ServiceFinding] = field(default_factory=list[ServiceFinding])
     os_findings: list[OsFinding] = field(default_factory=list[OsFinding])
     social: list[SocialLink] = field(default_factory=list[SocialLink])
+    whois: WhoisInfo | None = None
     brute_targets: list[BruteTarget] = field(default_factory=list[BruteTarget])
 
     def by_category(self) -> DetectedTech:
@@ -479,4 +508,5 @@ class ScanReport:
             "services": [service.to_dict() for service in self.services],
             "os_findings": [finding.to_dict() for finding in self.os_findings],
             "social": [link.to_dict() for link in self.social],
+            "whois": self.whois.to_dict() if self.whois else None,
         }

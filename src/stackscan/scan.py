@@ -30,6 +30,7 @@ from stackscan.net import (
     enumerate_subdomains,
     fetch_tls_info,
     lookup_geo,
+    lookup_whois,
     resolve_host,
     scan_ports,
 )
@@ -71,9 +72,7 @@ def _http_url(host: str, port: int, tls: bool) -> str:
     return f"{scheme}://{host}:{port}"
 
 
-async def _cdn_ips(
-    ips: set[str], *, timeout: float = 8.0, workers: int = 5
-) -> set[str]:
+async def _cdn_ips(ips: set[str], *, timeout: float = 8.0, workers: int = 5) -> set[str]:
     import aiohttp
 
     public = [ip for ip in ips if is_public_ip(ip)]
@@ -174,6 +173,7 @@ class ScanOptions:
     cve_online: bool = True
     cve_min_confidence: int = 0
     parse_social: bool = True
+    whois: bool = True
     ports: bool = True
     subdomains: bool = True
     hide_unresolved: bool = False
@@ -271,9 +271,7 @@ def _merge_technologies(primary: list[Technology], extra: list[Technology]) -> l
             by_name[key] = tech
         else:
             combined_evidence = tuple(dict.fromkeys((*existing.evidence, *tech.evidence)))
-            combined_categories = tuple(
-                dict.fromkeys((*existing.categories, *tech.categories))
-            )
+            combined_categories = tuple(dict.fromkeys((*existing.categories, *tech.categories)))
             by_name[key] = Technology(
                 name=existing.name,
                 categories=combined_categories or existing.categories,
@@ -360,7 +358,9 @@ async def _scan_site(
             technologies.extend(detect_vibe_code(not_found.body))
             software = _merge_software(
                 software,
-                extract_software(not_found.headers, not_found.body, location=host_of(not_found.url)),
+                extract_software(
+                    not_found.headers, not_found.body, location=host_of(not_found.url)
+                ),
             )
 
     infra = analyze_infra(fetched.headers, tuple(fetched.cookies), host)
@@ -591,7 +591,9 @@ async def discover_vhosts(
     if not targets:
         return []
     targets = list(dict.fromkeys(targets))
-    names = _vhost_candidate_names(report, min(options.subdomain_limit, _VHOST_MAX_CANDIDATES), body)
+    names = _vhost_candidate_names(
+        report, min(options.subdomain_limit, _VHOST_MAX_CANDIDATES), body
+    )
     if not names:
         return []
     baselines = await _vhost_baselines(
@@ -603,9 +605,7 @@ async def discover_vhosts(
     )
     semaphore = asyncio.Semaphore(max(options.workers, 50))
 
-    async def one(
-        target: tuple[str, int, bool], name: str
-    ) -> tuple[str, tuple[str, ...]] | None:
+    async def one(target: tuple[str, int, bool], name: str) -> tuple[str, tuple[str, ...]] | None:
         ip, port, tls = target
         baseline = baselines.get(target)
         if baseline is None or baseline[0] is None or baseline[2] is not None:
@@ -631,7 +631,11 @@ async def discover_vhosts(
         if 200 <= baseline[0] < 400:
             if status in (429, 503, 502, 403, 451):
                 return None
-        if status != baseline[0] or vname.lower() in indicator or vname.replace(".", "-") in indicator:
+        if (
+            status != baseline[0]
+            or vname.lower() in indicator
+            or vname.replace(".", "-") in indicator
+        ):
             return (vname, (ip,))
         return None
 
@@ -824,7 +828,12 @@ def _infra_technologies(infra: InfraInfo, host: str) -> list[Technology]:
         )
     for name in infra.server:
         techs.append(
-            Technology(name=name, categories=("infrastructure",), evidence=("header:server",), location=host)
+            Technology(
+                name=name,
+                categories=("infrastructure",),
+                evidence=("header:server",),
+                location=host,
+            )
         )
     return techs
 
@@ -988,8 +997,13 @@ async def scan_target(
                 _all_software(report), min_confidence=max(0, options.cve_min_confidence)
             )
 
-        if options.ip_info or options.default_creds or (options.cve and options.cve_online):
-            stage("enriching IPs & creds")
+        if (
+            options.ip_info
+            or options.default_creds
+            or (options.cve and options.cve_online)
+            or (options.whois and host)
+        ):
+            stage("enriching IPs, WHOIS & creds")
         online_coro = (
             match_cves_online(
                 _all_software(report), min_confidence=max(0, options.cve_min_confidence)
@@ -1002,8 +1016,9 @@ async def scan_target(
         creds_coro = (
             _detect_creds(report, host, options) if options.default_creds else _aval(empty_creds)
         )
-        online_cves, report.ip_info, creds_result = await asyncio.gather(
-            online_coro, ipinfo_coro, creds_coro
+        whois_coro = lookup_whois(host) if options.whois and host else _aval(None)
+        online_cves, report.ip_info, creds_result, report.whois = await asyncio.gather(
+            online_coro, ipinfo_coro, creds_coro, whois_coro
         )
         report.creds, report.brute_targets = creds_result
         if online_cves:

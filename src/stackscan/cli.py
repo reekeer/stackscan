@@ -233,6 +233,9 @@ _DISABLE_MAP: dict[str, str] = {
     "ct": "no_ct",
     "crt": "no_ct",
     "passive": "no_ct",
+    "whois": "no_whois",
+    "rdap": "no_whois",
+    "registration": "no_whois",
 }
 
 
@@ -370,6 +373,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         cve_online=not args.no_cve_online,
         cve_min_confidence=max(0, min(100, args.cve_min_confidence)),
         parse_social=not args.no_parse_social,
+        whois=not getattr(args, "no_whois", False),
         ports=not args.no_ports,
         subdomains=not args.no_subdomains,
         hide_unresolved=args.hide_unresolved,

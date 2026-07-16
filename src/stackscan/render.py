@@ -148,6 +148,36 @@ def _cdn_orgs(report: ScanReport) -> list[str]:
     return orgs
 
 
+def _whois_section(report: ScanReport) -> RenderableType | None:
+    whois = report.whois
+    if whois is None:
+        return None
+    grid = Table.grid(padding=(0, 1))
+    grid.add_column(style="bold cyan", no_wrap=True, justify="right")
+    grid.add_column(overflow="fold")
+    if whois.registrar:
+        grid.add_row("Registrar", whois.registrar)
+    if whois.registrant_public and whois.registrant:
+        grid.add_row("Registrant", Text(whois.registrant, style=theme.WARN))
+    elif whois.privacy:
+        grid.add_row("Registrant", Text(whois.privacy, style="dim"))
+    dates: list[str] = []
+    if whois.created:
+        dates.append(f"registered {whois.created[:10]}")
+    if whois.expires:
+        dates.append(f"expires {whois.expires[:10]}")
+    if dates:
+        grid.add_row("Dates", "  ·  ".join(dates))
+    if whois.statuses:
+        shown = ", ".join(whois.statuses[:4])
+        if len(whois.statuses) > 4:
+            shown += f"  (+{len(whois.statuses) - 4})"
+        grid.add_row("Status", Text(shown, style="dim"))
+    if not grid.row_count:
+        return None
+    return grid
+
+
 def _infra_section(report: ScanReport) -> RenderableType | None:
     infra = report.infra
     edge = summarize_edge(infra, _cdn_orgs(report))
@@ -590,6 +620,7 @@ def _exposure_section(report: ScanReport) -> RenderableType | None:
 
 _SECTIONS: tuple[tuple[str, _SectionBuilder], ...] = (
     ("Network / DNS", _network_section),
+    ("Registration (WHOIS)", _whois_section),
     ("IP intelligence", _ipinfo_section),
     ("Infrastructure", _infra_section),
     ("TLS / Protocol", _tls_section),

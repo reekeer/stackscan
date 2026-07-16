@@ -212,6 +212,26 @@ def _html_card(r: dict[str, Any]) -> str:
         if domains:
             rows.append(_kv("Domains", _chips(sorted(set(domains)))))
         body_parts.append(_section("Network / DNS", "".join(rows)))
+    whois = r.get("whois") or {}
+    if whois:
+        rows = ""
+        if whois.get("registrar"):
+            rows += _kv("Registrar", _e(whois["registrar"]))
+        if whois.get("registrant_public") and whois.get("registrant"):
+            rows += _kv("Registrant", _e(whois["registrant"]))
+        elif whois.get("privacy"):
+            rows += _kv("Registrant", _e(whois["privacy"]))
+        dates = []
+        if whois.get("created"):
+            dates.append(f"registered {_e(str(whois['created'])[:10])}")
+        if whois.get("expires"):
+            dates.append(f"expires {_e(str(whois['expires'])[:10])}")
+        if dates:
+            rows += _kv("Dates", " · ".join(dates))
+        if whois.get("statuses"):
+            rows += _kv("Status", _e(", ".join(whois["statuses"])))
+        if rows:
+            body_parts.append(_section("Registration (WHOIS)", rows))
     ipinfo = r.get("ip_info") or []
     if ipinfo:
         rows = "".join(

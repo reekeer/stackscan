@@ -22,6 +22,7 @@ from stackscan.types.output import (
     TakeoverFinding,
     Technology,
     TlsInfo,
+    WhoisInfo,
 )
 
 __all__ = [
@@ -50,4 +51,5 @@ __all__ = [
     "Subdomain",
     "Technology",
     "TlsInfo",
+    "WhoisInfo",
 ]

@@ -85,6 +85,62 @@ def load_tlds() -> tuple[str, ...]:
     return _parse_tlds(text) or _FALLBACK_TLDS
 
 
+_TWO_LEVEL_SUFFIXES: frozenset[str] = frozenset(
+    {
+        "co.uk",
+        "org.uk",
+        "gov.uk",
+        "ac.uk",
+        "me.uk",
+        "ltd.uk",
+        "plc.uk",
+        "com.au",
+        "net.au",
+        "org.au",
+        "com.br",
+        "com.cn",
+        "net.cn",
+        "org.cn",
+        "com.mx",
+        "com.tr",
+        "co.jp",
+        "co.kr",
+        "co.nz",
+        "co.za",
+        "co.in",
+        "co.il",
+        "com.sg",
+        "com.hk",
+        "com.tw",
+        "com.ua",
+        "com.ar",
+        "com.co",
+        "com.ph",
+        "com.my",
+        "com.vn",
+        "com.pk",
+        "com.ng",
+        "com.sa",
+        "org.il",
+    }
+)
+
+
+def registrable_domain(host: str) -> str:
+    host = host.strip().strip(".").lower()
+    for prefix in ("https://", "http://"):
+        if host.startswith(prefix):
+            host = host[len(prefix) :]
+    host = host.split("/", 1)[0].split("?", 1)[0].split(":", 1)[0]
+    labels = [label for label in host.split(".") if label]
+    if len(labels) < 2:
+        return host
+    last_two = ".".join(labels[-2:])
+    if last_two in _TWO_LEVEL_SUFFIXES and len(labels) >= 3:
+        return ".".join(labels[-3:])
+    return last_two
+
+
 def has_wildcard(target: str) -> bool:
     return "*" in target
 
