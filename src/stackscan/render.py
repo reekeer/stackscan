@@ -79,14 +79,21 @@ def _network_section(report: ScanReport) -> RenderableType | None:
     rows: list[tuple[str, str, str]] = []
     host = net.host if net else host_of(report.url) or ""
     dns_ttl: dict[str, int] = net.dns_ttl if net else {}
+    proxied_ips = {info.ip for info in report.ip_info if info.is_cdn}
 
     def add(rrtype: str, target: str, values: tuple[str, ...]) -> None:
         for value in values:
             rows.append((rrtype, target, value))
 
+    def add_addr(rrtype: str, target: str, values: tuple[str, ...]) -> None:
+        for value in values:
+            if proxied_ips and value in proxied_ips:
+                continue
+            rows.append((rrtype, target, value))
+
     if net is not None:
-        add("A", host, _sorted_ips(net.ipv4))
-        add("AAAA", host, _sorted_ips(net.ipv6))
+        add_addr("A", host, _sorted_ips(net.ipv4))
+        add_addr("AAAA", host, _sorted_ips(net.ipv6))
         add("CNAME", host, net.cname)
         add("MX", host, net.mx)
         add("NS", host, net.ns)
@@ -110,6 +117,8 @@ def _network_section(report: ScanReport) -> RenderableType | None:
         if not sub.addresses:
             continue
         for ip in _sorted_ips(sub.addresses):
+            if proxied_ips and ip in proxied_ips:
+                continue
             rows.append((_ip_rrtype(ip), sub.name, ip))
 
     if not rows:
