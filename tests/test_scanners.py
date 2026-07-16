@@ -40,6 +40,28 @@ def test_detect_isp_block_no_block() -> None:
     assert detect_isp_block("https://example.com", fetched) is None
 
 
+def test_detect_isp_block_by_title() -> None:
+    fetched = FetchResult(
+        url="https://example.com/",
+        status=200,
+        headers={},
+        body="<html><title>Доступ ограничен</title></html>",
+        cookies=(),
+    )
+    assert detect_isp_block("https://example.com", fetched) is not None
+
+
+def test_detect_isp_block_by_location_header() -> None:
+    fetched = FetchResult(
+        url="https://block.some-isp.example/notice",
+        status=302,
+        headers={"location": "https://block.some-isp.example/notice"},
+        body="",
+        cookies=(),
+    )
+    assert detect_isp_block("https://example.com", fetched) is not None
+
+
 def test_scan_secrets_finds_aws_key_and_jwt() -> None:
     body = (
         'apiKey = "AKIAIOSFODNN7EXAMPLE"\n'
