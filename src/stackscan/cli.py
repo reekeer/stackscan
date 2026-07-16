@@ -19,7 +19,7 @@ from stackscan.analyzers import TechAnalyzer, brute_devices, summarize_edge
 from stackscan.config import NoSignaturesError, SourceError, SourceStore, build_matchers
 from stackscan.net import GeoProvider, nmap_available
 from stackscan.render import render_banner, render_reports
-from stackscan.scan import ScanOptions, StageLog, scan_target
+from stackscan.scan import ScanOptions, StageLog, scan_target, stage_total
 from stackscan.types import BruteTarget, CredFinding, DetectedTech, ScanReport
 from stackscan.utils import expand_cidr, is_cidr, normalize_url
 
@@ -313,8 +313,6 @@ async def _expand_wildcards(raw_targets: list[str], workers: int) -> list[str]:
 
 
 class _StageTracker:
-    """Progress logger: stage() advances the bar, info() only updates the label."""
-
     def __init__(self, progress_obj: Progress, task_id: Any, target: str) -> None:
         self._progress = progress_obj
         self._task_id = task_id
@@ -403,19 +401,21 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
     err_console = Console(stderr=True)
     total_targets = len(targets)
     completed = 0
+    staged = args.verbose >= 2 or (args.verbose == 0 and total_targets == 1)
+    per_target_total = stage_total(options)
 
     async def scan_one(
         target: str,
         progress_obj: Progress | None = None,
         task_id: Any | None = None,
-        stage_total: int = 1,
+        target_total: int = 1,
     ) -> ScanReport:
         nonlocal completed
         if args.verbose == 1:
             err_console.print(f"[{theme.MUTED}][*] Starting scan of {target}...[/]")
 
         stage_log: StageLog | None = None
-        if args.verbose >= 2 and progress_obj is not None and task_id is not None:
+        if staged and progress_obj is not None and task_id is not None:
             stage_log = _StageTracker(progress_obj, task_id, target)
             stage_log.info("starting...")
 
@@ -457,8 +457,8 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
             )
 
         if progress_obj is not None and task_id is not None:
-            if args.verbose >= 2:
-                progress_obj.update(task_id, completed=stage_total, description=f"[+] {target}")
+            if staged:
+                progress_obj.update(task_id, completed=target_total, description=f"[+] {target}")
             else:
                 progress_obj.update(task_id, advance=1, description=f"Scanning: {target}")
 
@@ -470,7 +470,6 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
                 return True
         return False
 
-    _stage_count = 20
     semaphore = asyncio.Semaphore(max(args.concurrency, 1))
     async with StackscanSession() as session:
         if not is_json_terminal():
@@ -484,13 +483,13 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
                 console=err_console,
                 transient=transient,
             ) as progress:
-                if args.verbose >= 2:
+                if staged:
                     task_ids = {
-                        target: progress.add_task(f"[~] {target}", total=_stage_count)
+                        target: progress.add_task(f"[~] {target}", total=per_target_total)
                         for target in targets
                     }
                     tasks = [
-                        scan_one(target, progress, task_ids[target], _stage_count)
+                        scan_one(target, progress, task_ids[target], per_target_total)
                         for target in targets
                     ]
                 else:

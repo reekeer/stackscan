@@ -2,8 +2,36 @@ from __future__ import annotations
 
 import asyncio
 
-from stackscan.scan import _fetch_with_fallback
+from stackscan.scan import ScanOptions, _fetch_with_fallback, stage_total
 from stackscan.types import FetchResult, ScanReport
+
+
+def _opts(**overrides: object) -> ScanOptions:
+    base: dict[str, object] = {
+        "timeout": 5.0,
+        "user_agent": "t",
+        "insecure": False,
+        "max_bytes": 1000,
+    }
+    base.update(overrides)
+    return ScanOptions(**base)  # type: ignore[arg-type]
+
+
+def test_stage_total_default_passes() -> None:
+    assert stage_total(_opts()) == 9
+
+
+def test_stage_total_minimal_passes() -> None:
+    minimal = _opts(
+        subdomains=False,
+        probe=False,
+        ports=False,
+        cve=False,
+        cve_online=False,
+        ip_info=False,
+        whois=False,
+    )
+    assert stage_total(minimal) == 5
 
 
 class _FakeSession:

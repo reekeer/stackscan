@@ -192,6 +192,27 @@ class ScanOptions:
     site_limit: int = 20
 
 
+def stage_total(options: ScanOptions) -> int:
+    total = 4
+    if options.subdomains or options.probe:
+        total += 1
+    if options.smart_scan or options.ports:
+        total += 1
+    if options.discover_sites:
+        total += 1
+    if options.cve:
+        total += 1
+    if (
+        options.ip_info
+        or options.default_creds
+        or (options.cve and options.cve_online)
+        or options.whois
+    ):
+        total += 1
+    total += 1
+    return total
+
+
 def _collect_dns_domains(host: str, dns: Any) -> tuple[str, ...]:
     domains: set[str] = {host}
     for vals in (dns.cname, dns.mx, dns.ns, dns.soa, dns.txt):
@@ -861,7 +882,7 @@ async def scan_target(
             log.info(message)
 
     async with semaphore:
-        stage("resolving DNS & fetching page")
+        stage("resolving DNS, TLS & fetching homepage")
         tls_coro = (
             asyncio.to_thread(fetch_tls_info, host, port_of(url), insecure=options.insecure)
             if options.tls and host and is_https(url)
@@ -876,17 +897,18 @@ async def scan_target(
         if fetched is not None:
             block_msg = detect_isp_block(url, fetched)
             if block_msg:
-                stage(block_msg)
+                info(block_msg)
                 report.error = block_msg
                 report.final_url = fetched.url
                 report.status = fetched.status
                 report.elapsed = perf_counter() - started
                 return report
-            stage("parsing page & detecting technologies")
+            stage("detecting technologies")
             report.final_url = fetched.url
             report.status = fetched.status
             report.technologies = matchers_analyzer.detect(fetched)
             report.technologies.extend(detect_vibe_code(fetched.body))
+            stage("fingerprinting edge, headers & protocols")
             report.infra = analyze_infra(fetched.headers, tuple(fetched.cookies), host)
             report.technologies = _merge_technologies(
                 report.technologies, _infra_technologies(report.infra, host_of(fetched.url))
@@ -894,16 +916,15 @@ async def scan_target(
             report.technologies = _normalize_protocol_techs(report.technologies)
             report.security = analyze_security_headers(fetched.headers)
             report.protocols = _http_protocols(fetched, report.tls)
+            stage("scanning page for secrets & contacts")
             report.secrets = scan_secrets(
                 fetched.body, location=host_of(fetched.url) if fetched else host or ""
             )
             if options.parse_social:
                 report.social = parse_social(fetched.body, fetched.url)
 
-        if options.subdomains and host:
-            stage("enumerating subdomains")
-        elif options.probe and fetched is not None:
-            stage("probing exposure")
+        if (options.subdomains and host) or (options.probe and fetched is not None):
+            stage("enumerating subdomains & probing exposure")
         san = report.tls.subject_alt_names if report.tls else ()
         content_hosts: set[str] = (
             hostnames_in_records((fetched.body,), host) if fetched and host else set()
@@ -937,7 +958,7 @@ async def scan_target(
         report.subdomains, report.exposure = await asyncio.gather(sub_coro, exp_coro)
 
         if options.subdomains and report.subdomains:
-            stage("checking for subdomain takeovers")
+            info(f"checking {len(report.subdomains)} subdomain(s) for takeovers")
             report.takeovers = await detect_takeovers(
                 report.subdomains,
                 session,
@@ -949,7 +970,7 @@ async def scan_target(
         ips = _collect_ips(report)
         cdn_ips: set[str] = set()
         if (options.smart_scan or options.ports) and ips:
-            stage("identifying CDN/proxy IPs")
+            info("identifying CDN/proxy IPs")
             cdn_ips = await _cdn_ips(
                 ips,
                 timeout=min(options.timeout, 8.0),
@@ -1026,8 +1047,9 @@ async def scan_target(
 
         report.hide_unresolved = options.hide_unresolved
         if options.ip_info:
-            report.real_ips = {info.ip for info in report.ip_info if not info.is_cdn}
+            report.real_ips = {entry.ip for entry in report.ip_info if not entry.is_cdn}
 
+        stage("classifying services & OS")
         report.services = classify_services(report)
         report.os_findings = detect_os(report)
     report.elapsed = perf_counter() - started
