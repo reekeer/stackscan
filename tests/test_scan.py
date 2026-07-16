@@ -18,7 +18,7 @@ def _opts(**overrides: object) -> ScanOptions:
 
 
 def test_stage_total_default_passes() -> None:
-    assert stage_total(_opts()) == 9
+    assert stage_total(_opts()) == 17
 
 
 def test_stage_total_minimal_passes() -> None:
@@ -31,7 +31,24 @@ def test_stage_total_minimal_passes() -> None:
         ip_info=False,
         whois=False,
     )
-    assert stage_total(minimal) == 5
+    assert stage_total(minimal) == 7
+
+
+def test_stage_total_full_passes() -> None:
+    full = _opts(
+        subdomains=True,
+        probe=True,
+        ports=True,
+        cve=True,
+        cve_online=True,
+        ip_info=True,
+        whois=True,
+        default_creds=True,
+        parse_social=True,
+        smart_scan=True,
+        discover_sites=True,
+    )
+    assert stage_total(full) == 20
 
 
 class _FakeSession:
