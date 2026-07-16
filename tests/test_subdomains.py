@@ -5,8 +5,10 @@ from pathlib import Path
 import pytest
 
 from stackscan.net.subdomains import (
+    _ordered_labels,
     _parse_labels,
     apex_domain,
+    hostnames_in_records,
     load_bundled_wordlist,
     load_wordlist,
 )
@@ -31,6 +33,27 @@ def test_bundled_wordlist_has_common_labels() -> None:
 
 def test_parse_labels_dedupes_and_skips_comments() -> None:
     assert _parse_labels("# c\nmail\n\nmail\ndev\n") == ("mail", "dev")
+
+
+def test_hostnames_in_records_finds_plain_and_escaped() -> None:
+    body = 'src="https://cdn.leavepulse.com/x" ' '"https:\\u002F\\u002Fapi.leavepulse.com\\u002Fv1"'
+    found = hostnames_in_records((body,), "leavepulse.com")
+    assert "cdn.leavepulse.com" in found
+    assert "api.leavepulse.com" in found
+
+
+def test_hostnames_in_records_drops_escape_artifact() -> None:
+    body = "https:\\u002F\\u002Fcdn.leavepulse.com\\u002F"
+    found = hostnames_in_records((body,), "leavepulse.com")
+    assert "cdn.leavepulse.com" in found
+    assert not any(name.startswith("u002f") for name in found)
+
+
+def test_ordered_labels_includes_modern_app_labels() -> None:
+    labels = _ordered_labels(5000)
+    assert "agents" in labels
+    assert "gateway" in labels
+    assert "ws" in labels
 
 
 def test_load_wordlist_uses_cache_without_network(

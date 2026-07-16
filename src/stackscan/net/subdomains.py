@@ -178,10 +178,72 @@ _PRIORITY_LABELS: tuple[str, ...] = (
 )
 
 
+_MODERN_LABELS: tuple[str, ...] = (
+    "agents",
+    "agent",
+    "ai",
+    "ml",
+    "ws",
+    "wss",
+    "socket",
+    "sockets",
+    "realtime",
+    "gateway",
+    "gw",
+    "edge",
+    "ingest",
+    "events",
+    "event",
+    "webhook",
+    "webhooks",
+    "hooks",
+    "functions",
+    "fn",
+    "workers",
+    "worker",
+    "queue",
+    "jobs",
+    "cron",
+    "metrics",
+    "logs",
+    "trace",
+    "telemetry",
+    "registry",
+    "storage",
+    "media",
+    "img",
+    "images",
+    "upload",
+    "uploads",
+    "updates",
+    "update",
+    "releases",
+    "launcher",
+    "id",
+    "sso",
+    "oauth",
+    "accounts",
+    "account",
+    "billing",
+    "pay",
+    "payments",
+    "checkout",
+    "panel",
+    "console",
+    "relay",
+    "turn",
+    "voice",
+    "push",
+    "notify",
+    "live",
+    "stream",
+)
+
+
 def _ordered_labels(limit: int) -> tuple[str, ...]:
     seen: set[str] = set()
     ordered: list[str] = []
-    for label in (*_PRIORITY_LABELS, *load_bundled_wordlist(), *load_wordlist()):
+    for label in (*_PRIORITY_LABELS, *_MODERN_LABELS, *load_bundled_wordlist(), *load_wordlist()):
         if label not in seen:
             seen.add(label)
             ordered.append(label)
@@ -343,13 +405,26 @@ RECURSIVE_PREFIXES: tuple[str, ...] = (
 )
 _MAX_RECURSIVE = 3000
 _HOST_RE = re.compile("[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+")
+_ESCAPE_RE = re.compile(r"\\u([0-9a-fA-F]{4})|\\x([0-9a-fA-F]{2})")
+
+
+def _decode_escapes(text: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        hexv = match.group(1) or match.group(2)
+        try:
+            code = int(hexv, 16)
+        except ValueError:
+            return " "
+        return chr(code) if 0x20 <= code <= 0x10FFFF else " "
+
+    return _ESCAPE_RE.sub(repl, text)
 
 
 def hostnames_in_records(values: tuple[str, ...], apex: str) -> set[str]:
     suffix = "." + apex
     found: set[str] = set()
     for value in values:
-        for match in _HOST_RE.findall(value.lower()):
+        for match in _HOST_RE.findall(_decode_escapes(value).lower()):
             host = match.strip(".")
             if host != apex and host.endswith(suffix):
                 found.add(host)
