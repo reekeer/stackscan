@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import re
 from collections.abc import Callable
 from urllib.parse import urljoin
@@ -75,29 +76,41 @@ def _sorted_ips(ips: tuple[str, ...]) -> tuple[str, ...]:
 
 def _network_section(report: ScanReport) -> RenderableType | None:
     net = report.network
-    if net is None:
-        return None
-
     rows: list[tuple[str, str, str]] = []
-    host = net.host
+    host = net.host if net else host_of(report.url) or ""
+    dns_ttl: dict[str, int] = net.dns_ttl if net else {}
 
     def add(rrtype: str, target: str, values: tuple[str, ...]) -> None:
         for value in values:
             rows.append((rrtype, target, value))
 
-    add("A", host, _sorted_ips(net.ipv4))
-    add("AAAA", host, _sorted_ips(net.ipv6))
-    add("CNAME", host, net.cname)
-    add("MX", host, net.mx)
-    add("NS", host, net.ns)
-    add("TXT", host, net.txt)
-    add("SOA", host, net.soa)
-    add("CAA", host, net.caa)
-    for ip, name in sorted(net.reverse_dns.items(), key=lambda x: _ip_sort_key(x[0])):
-        rows.append(("PTR", ip, name))
-    if net.geo:
-        for ip, data in sorted(net.geo.items(), key=lambda x: _ip_sort_key(x[0])):
-            rows.append(("Geo", ip, ", ".join(v for v in data.values() if v)))
+    if net is not None:
+        add("A", host, _sorted_ips(net.ipv4))
+        add("AAAA", host, _sorted_ips(net.ipv6))
+        add("CNAME", host, net.cname)
+        add("MX", host, net.mx)
+        add("NS", host, net.ns)
+        add("TXT", host, net.txt)
+        add("SOA", host, net.soa)
+        add("CAA", host, net.caa)
+        for ip, name in sorted(net.reverse_dns.items(), key=lambda x: _ip_sort_key(x[0])):
+            rows.append(("PTR", ip, name))
+        if net.geo:
+            for ip, data in sorted(net.geo.items(), key=lambda x: _ip_sort_key(x[0])):
+                rows.append(("Geo", ip, ", ".join(v for v in data.values() if v)))
+
+    def _ip_rrtype(ip: str) -> str:
+        try:
+            parsed = ipaddress.ip_address(ip.split("%", 1)[0])
+        except ValueError:
+            return "A"
+        return "AAAA" if isinstance(parsed, ipaddress.IPv6Address) else "A"
+
+    for sub in sorted(report.subdomains, key=lambda s: s.name):
+        if not sub.addresses:
+            continue
+        for ip in _sorted_ips(sub.addresses):
+            rows.append((_ip_rrtype(ip), sub.name, ip))
 
     if not rows:
         return None
@@ -109,8 +122,8 @@ def _network_section(report: ScanReport) -> RenderableType | None:
     table.add_column("TTL", justify="right", no_wrap=True)
     for rrtype, target, value in rows:
         ttl = ""
-        if rrtype in net.dns_ttl:
-            ttl = str(net.dns_ttl[rrtype])
+        if rrtype in dns_ttl:
+            ttl = str(dns_ttl[rrtype])
         table.add_row(rrtype, target, value, ttl)
     return table
 
