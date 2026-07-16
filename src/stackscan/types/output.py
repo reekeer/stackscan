@@ -422,6 +422,8 @@ class ScanReport:
     cves: list[CveMatch] = field(default_factory=list[CveMatch])
     ports: PortScan | None = None
     subdomains: list[Subdomain] = field(default_factory=list[Subdomain])
+    hide_unresolved: bool = False
+    real_ips: set[str] = field(default_factory=set[str])
     ip_info: list[IpInfo] = field(default_factory=list[IpInfo])
     creds: list[CredFinding] = field(default_factory=list[CredFinding])
     secrets: list[SecretFinding] = field(default_factory=list[SecretFinding])
@@ -466,6 +468,8 @@ class ScanReport:
             "cves": [cve.to_dict() for cve in self.cves],
             "ports": self.ports.to_dict() if self.ports else None,
             "subdomains": [sub.to_dict() for sub in self.subdomains],
+            "hide_unresolved": self.hide_unresolved,
+            "real_ips": sorted(self.real_ips),
             "ip_info": [info.to_dict() for info in self.ip_info],
             "creds": [finding.to_dict() for finding in self.creds],
             "secrets": [secret.to_dict() for secret in self.secrets],

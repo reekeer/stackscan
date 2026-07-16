@@ -461,10 +461,20 @@ def _subdomains_section(report: ScanReport) -> RenderableType | None:
     table.add_column("Subdomain", style="bold cyan", overflow="fold")
     table.add_column("Addresses", overflow="fold")
     table.add_column("Source", style="dim", no_wrap=True)
+    show_real = bool(report.real_ips)
+    if show_real:
+        table.add_column("Real IP", style="bold green", no_wrap=True)
     for sub in report.subdomains:
+        if report.hide_unresolved and not sub.addresses:
+            continue
         addrs = ", ".join(sub.addresses) if sub.addresses else "(no A record)"
-        table.add_row(sub.name, addrs, sub.source)
-    return table
+        real = [ip for ip in sub.addresses if ip in report.real_ips]
+        real_cell = ", ".join(real) if real else "-"
+        if show_real:
+            table.add_row(sub.name, addrs, sub.source, real_cell)
+        else:
+            table.add_row(sub.name, addrs, sub.source)
+    return table if table.row_count else None
 
 
 def _os_section(report: ScanReport) -> RenderableType | None:

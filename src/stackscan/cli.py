@@ -130,6 +130,12 @@ def _build_scan_parser() -> argparse.ArgumentParser:
         help="Max wordlist labels to resolve (0 = the full ~870k list, slow).",
     )
     parser.add_argument(
+        "--hide-unresolved",
+        dest="hide_unresolved",
+        action="store_true",
+        help="Hide subdomain entries that have no A record.",
+    )
+    parser.add_argument(
         "--site-limit",
         dest="site_limit",
         type=int,
@@ -404,6 +410,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         parse_social=args.parse_social,
         ports=(args.ports or full) and (not getattr(args, "no_ports", False)),
         subdomains=(args.subdomains or full) and (not getattr(args, "no_subdomains", False)),
+        hide_unresolved=args.hide_unresolved,
         ip_info=not args.no_ip_info,
         default_creds=(args.default_creds or full or args.full_auto)
         and (not getattr(args, "no_creds", False)),

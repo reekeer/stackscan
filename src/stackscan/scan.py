@@ -176,6 +176,7 @@ class ScanOptions:
     parse_social: bool = False
     ports: bool = False
     subdomains: bool = False
+    hide_unresolved: bool = False
     ip_info: bool = True
     default_creds: bool = False
     port_timeout: float = 2.0
@@ -1007,6 +1008,10 @@ async def scan_target(
         report.creds, report.brute_targets = creds_result
         if online_cves:
             report.cves = merge_cve_matches(report.cves, online_cves)
+
+        report.hide_unresolved = options.hide_unresolved
+        if options.ip_info:
+            report.real_ips = {info.ip for info in report.ip_info if not info.is_cdn}
 
         report.services = classify_services(report)
         report.os_findings = detect_os(report)
