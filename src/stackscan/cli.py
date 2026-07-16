@@ -93,9 +93,9 @@ def _build_scan_parser() -> argparse.ArgumentParser:
         "--cve-min-confidence",
         dest="cve_min_confidence",
         type=int,
-        default=50,
+        default=40,
         metavar="N",
-        help="Hide CVE matches with confidence below N (0-100, default 50).",
+        help="Hide CVE matches with confidence below N (0-100, default 40).", 
     )
     parser.add_argument(
         "--full",
