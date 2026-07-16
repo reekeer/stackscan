@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-07-16
+
+### Added
+
+- WHOIS/RDAP lookup showing the domain registrar, registration and expiry dates, and whether the registrant contact is public or withheld for privacy (disable with `--disable whois`).
+- Single "behind X" edge summary that groups each provider's CDN/WAF/proxy roles and chains layered services front-to-back (e.g. Cloudflare (CDN, WAF) → Amazon CloudFront).
+- Modern application subdomain labels (`agents`, `ws`, `gateway`, `functions`, `webhooks`, …) in the priority wordlist so common app hosts are tried within the default limit.
+
+### Changed
+
+- Resolve DNS via cached public resolvers (Cloudflare and Google plus censorship-resistant fallbacks) instead of the system resolver, cutting per-domain record lookups from ~10s to sub-second and caching results within a run. Deep hosts that the system resolver missed now resolve reliably.
+- Break scans into finer, accurately-counted stages and show the staged progress view by default for single-target scans.
+- Query crt.sh once and retry only on failure to avoid doubling the certificate-transparency wait.
+
+### Fixed
+
+- Hide distro-backported and SSH banner CVEs below the default confidence threshold so phantom CVEs no longer surface unless the threshold is lowered.
+- Decode `\uXXXX`/`\xXX` escapes when extracting hostnames from page content, fixing bogus subdomains like `u002fcdn.example.com` and recovering the real escaped ones.
+- Stop scraping page prose and crypto tokens (e.g. `ed25519`) as generic technologies/software; truncate scraped product names at connective stopwords.
+- Only query NVD live when `--cve-online` is passed, matching the documented offline default.
+
 ## [2.3.0] - 2026-07-16
 
 ### Added
