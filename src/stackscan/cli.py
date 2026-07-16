@@ -368,7 +368,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         probe=not args.no_probe,
         probe_404=not args.no_404_probe,
         cve=not args.no_cve,
-        cve_online=not args.no_cve_online,
+        cve_online=args.cve_online and not args.no_cve_online,
         cve_min_confidence=max(0, min(100, args.cve_min_confidence)),
         parse_social=not args.no_parse_social,
         whois=not getattr(args, "no_whois", False),
