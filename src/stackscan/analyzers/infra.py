@@ -120,7 +120,7 @@ def _canonical_provider(org: str) -> str:
     return name
 
 
-def summarize_edge(infra: InfraInfo, cdn_orgs: Iterable[str] = ()) -> str:
+def summarize_edge(infra: InfraInfo, cdn_orgs: Iterable[str] = (), *, sep: str = " → ") -> str:
     roles: dict[str, list[str]] = {}
     order: list[str] = []
     role_names = {"cdn": infra.cdn, "waf": infra.waf, "proxy": infra.proxy}
@@ -146,7 +146,7 @@ def summarize_edge(infra: InfraInfo, cdn_orgs: Iterable[str] = ()) -> str:
     for name in order:
         labels = ", ".join(_ROLE_LABEL[r] for r in _ROLE_ORDER if r in roles[name])
         parts.append(f"{name} ({labels})" if labels else name)
-    return " → ".join(parts)
+    return sep.join(parts)
 
 
 def analyze_infra(headers: Headers, cookies: tuple[str, ...], host: str) -> InfraInfo:

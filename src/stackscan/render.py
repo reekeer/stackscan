@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from collections.abc import Callable
+from functools import lru_cache
 from urllib.parse import urljoin
 
 from rich.console import Console, Group, RenderableType
@@ -18,6 +19,13 @@ from stackscan.utils import host_of
 _SectionBuilder = Callable[[ScanReport], "RenderableType | None"]
 _LABEL = f"bold {theme.ACCENT}"
 _HEADER = f"bold {theme.ACCENT_2}"
+
+
+@lru_cache(maxsize=1)
+def _glyphs() -> theme.Glyphs:
+    return theme.glyphs(Console())
+
+
 BANNER = "\n ____  ____  __    ___  __ _  ____   ___   __   __ _\n/ ___)(_  _)/ _\\  / __)(  / )/ ___) / __) / _\\ (  ( \\\n\\___ \\  )( /    \\( (__  )  ( \\___ \\( (__ /    \\/    /\n(____/ (__)\\_/\\_/ \\___)(__\\_)(____/ \\___)\\_/\\_/\\_)__)"
 
 
@@ -180,7 +188,7 @@ def _whois_section(report: ScanReport) -> RenderableType | None:
 
 def _infra_section(report: ScanReport) -> RenderableType | None:
     infra = report.infra
-    edge = summarize_edge(infra, _cdn_orgs(report))
+    edge = summarize_edge(infra, _cdn_orgs(report), sep=f" {_glyphs().arrow} ")
     if not edge and not infra.notes:
         return None
     grid = Table.grid(padding=(0, 1))
@@ -568,9 +576,10 @@ def _social_section(report: ScanReport) -> RenderableType | None:
     grid.add_column(overflow="fold")
     by_platform: dict[str, list[str]] = {}
     for link in report.social:
-        by_platform.setdefault(link.platform, []).append(link.handle or link.url)
+        by_platform.setdefault(link.platform, []).append(link.url)
     for platform in sorted(by_platform):
-        grid.add_row(platform, ", ".join(dict.fromkeys(by_platform[platform])))
+        links = ", ".join(dict.fromkeys(by_platform[platform]))
+        grid.add_row(platform, Text(links, style=theme.ACCENT))
     return grid
 
 
@@ -658,12 +667,13 @@ def _report_panel(report: ScanReport) -> Panel:
     if report.error:
         blocks.append(Text(f"error: {report.error}", style="red"))
     worst = _worst_severity(report)
+    section = _glyphs().section
     for title, builder in _SECTIONS:
         rendered = builder(report)
         if rendered is None:
             continue
         blocks.append(Text())
-        blocks.append(Text(f"▸ {title}", style="bold"))
+        blocks.append(Text(f"{section} {title}", style="bold"))
         blocks.append(rendered)
     danger = worst in ("CRITICAL", "HIGH") or any(
         f.kind in ("default-creds", "open-no-auth") for f in report.creds

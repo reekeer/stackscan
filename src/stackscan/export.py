@@ -379,7 +379,7 @@ def _html_card(r: dict[str, Any]) -> str:
         rows = "".join(
             _kv(
                 _e(s.get("platform")),
-                f'<a href="{_e(s.get("url"))}">{_e(s.get("handle") or s.get("url"))}</a>',
+                f'<a href="{_e(s.get("url"))}">{_e(s.get("url"))}</a>',
             )
             for s in social
         )
