@@ -34,6 +34,7 @@ class StackscanSession:
         insecure: bool,
         max_bytes: int,
         headers: dict[str, str] | None = None,
+        allow_redirects: bool = True,
     ) -> FetchResult:
         session = self._session
         if session is None:
@@ -46,6 +47,7 @@ class StackscanSession:
             headers=request_headers,
             ssl=False if insecure else True,
             timeout=ClientTimeout(total=timeout),
+            allow_redirects=allow_redirects,
         ) as resp:
             status = resp.status
             header_items = list(resp.headers.items())

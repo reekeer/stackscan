@@ -30,6 +30,7 @@ class _MockSession:
         insecure: bool,
         max_bytes: int,
         headers: dict[str, str] | None = None,
+        allow_redirects: bool = True,
     ) -> FetchResult:
         self.calls.append((url, headers))
         key = (url, headers.get("Host") if headers else None)
