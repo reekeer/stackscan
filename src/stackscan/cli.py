@@ -341,14 +341,14 @@ class _StageTracker:
         self._progress.update(
             self._task_id,
             advance=1,
-            description=f"[~] {self._target} · {message}",
+            description=f"{_glyphs().run} {self._target} {_glyphs().bullet} {message}",
         )
         self._title(message)
 
     def info(self, message: str) -> None:
         self._progress.update(
             self._task_id,
-            description=f"[~] {self._target} · {message}",
+            description=f"{_glyphs().run} {self._target} {_glyphs().bullet} {message}",
         )
         self._title(message)
 
@@ -363,7 +363,7 @@ class _StageTracker:
         self._progress.update(
             self._task_id,
             advance=steps,
-            description=f"[~] {self._target} · {message}",
+            description=f"{_glyphs().run} {self._target} {_glyphs().bullet} {message}",
         )
         self._title(message)
 
@@ -493,7 +493,9 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         _set_title(f"stackscan {completed}/{total_targets} · {target.split('://', 1)[-1]}")
         if progress_obj is not None and task_id is not None:
             if staged:
-                progress_obj.update(task_id, completed=target_total, description=f"[+] {target}")
+                progress_obj.update(
+                    task_id, completed=target_total, description=f"{_glyphs().ok} {target}"
+                )
             else:
                 progress_obj.update(task_id, advance=1, description=f"Scanning: {target}")
 
