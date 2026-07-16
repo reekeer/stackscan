@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] - 2026-07-17
+
+### Added
+
+- Detect self-hosted apps and admin panels (Gitea/Forgejo, Matrix Synapse/Element/synapse-admin, MikroTik, Proxmox, Portainer, Grafana, Jellyfin, the *arr stack, Vaultwarden, Keycloak and ~90 more) from the rebuilt signature database, surfaced as admin-panel/service findings.
+- Cover MikroTik/RouterOS, pfSense/OPNsense, UniFi and other device/panel keywords in the default-credential check.
+
+### Fixed
+
+- Skip virtual-host discovery on catch-all/wildcard edge IPs (e.g. Cloudflare) so a wildcard domain no longer yields hundreds of bogus `mail.*`/`www.www.*` subdomains.
+- Reject bogus phone numbers (`tel:8`) and malformed `mailto:` addresses in the social/contacts parser.
+- Read the brute-force confirmation prompt from the controlling terminal (`/dev/tty`) so `y/n` works during a scan.
+
+### Changed
+
+- Use emoji for warnings/errors and verbose scan lines when the terminal supports unicode.
+
 ## [2.6.0] - 2026-07-16
 
 ### Added
