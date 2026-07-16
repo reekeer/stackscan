@@ -75,6 +75,13 @@ def _title(text: str) -> str:
     return match.group(1).lower() if match else ""
 
 
+def _location_host(location: str) -> str:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(location.strip())
+    return (parsed.hostname or "").lower()
+
+
 def _is_same_family(original: str, final: str) -> bool:
     """Return True when final host is the original host or its subdomain."""
     return final == original or final.endswith("." + original)
@@ -104,6 +111,13 @@ def detect_isp_block(url: str, fetched: FetchResult) -> str | None:
 
     if any(marker in body for marker in _BLOCK_BODY_MARKERS):
         return _block_message(url)
+
+    # Redirect target (even when not followed) points to a known block host.
+    if fetched.status in (301, 302, 307, 308):
+        location = (fetched.headers.get("location") or "").lower()
+        loc_host = _location_host(location)
+        if any(marker in loc_host for marker in _BLOCK_HOST_MARKERS):
+            return _block_message(url)
 
     # External redirect to a non-target host that looks like a block page.
     if fetched.status in (301, 302, 307, 308) and final and original:
