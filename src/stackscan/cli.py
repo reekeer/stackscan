@@ -434,7 +434,7 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
     err_console = Console(stderr=True)
     total_targets = len(targets)
     completed = 0
-    staged = args.verbose >= 2 or (args.verbose == 0 and total_targets == 1)
+    staged = args.verbose >= 1 or (args.verbose == 0 and total_targets == 1)
     per_target_total = stage_total(options)
 
     async def scan_one(
