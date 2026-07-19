@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.4] - 2026-07-19
+
+### Added
+
+- `stackscan sigdb add` now treats a database base URL/directory/git repo (with `sigdb/` and `stackscan/`) as a single source, pulling the compiled signatures via `sigdb/manifest.json` and the CVE database (`stackscan/cve.json.gz`) and subdomain wordlist (`stackscan/subdomains.txt`) alongside it. Defaults to `https://db.imalive.lol`.
+- `stackscan sigdb list` always shows the built-in `db.imalive.lol` database (`/sigdb` + `/stackscan`) as a `Default` row.
+
+### Changed
+
+- Drop the emoji/unicode glyphs and use plain ASCII markers everywhere (`[+]`, `[!]`, `[x]`, `[?]`, `->`).
+
+### Fixed
+
+- Read the brute-force `y/n` prompt (and print it) through the controlling terminal (`/dev/tty`) so the answer registers even when stderr is redirected.
+- Harden virtual-host discovery: skip edge IPs whose unknown-Host responses are flaky (varying status across probes), cutting bogus vhost subdomains.
+
 ## [2.6.3] - 2026-07-17
 
 ### Added
