@@ -30,8 +30,23 @@ def _parse_labels(text: str) -> tuple[str, ...]:
     return tuple(labels)
 
 
+def _source_wordlist() -> tuple[str, ...] | None:
+    from stackscan.config.sources import SourceStore
+
+    override = SourceStore().resolve_subdomains()
+    if override is None:
+        return None
+    try:
+        return _parse_labels(override.read_text("utf-8"))
+    except OSError:
+        return None
+
+
 @lru_cache(maxsize=1)
 def load_bundled_wordlist() -> tuple[str, ...]:
+    source = _source_wordlist()
+    if source:
+        return source
     text = resources.files("stackscan.data").joinpath("subdomains.txt").read_text("utf-8")
     return _parse_labels(text)
 
@@ -44,6 +59,9 @@ def _download_wordlist() -> str:
 
 @lru_cache(maxsize=1)
 def load_wordlist() -> tuple[str, ...]:
+    source = _source_wordlist()
+    if source:
+        return source
     cache = db_dir() / "seclists-dns-top110k.txt"
     if cache.is_file():
         try:

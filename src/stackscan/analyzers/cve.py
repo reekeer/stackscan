@@ -106,12 +106,26 @@ _CORE_COMMIT_RE = re.compile(
 )
 
 
+def _cve_bytes() -> bytes | None:
+    from stackscan.config.sources import SourceStore
+
+    override = SourceStore().resolve_cve()
+    if override is not None:
+        try:
+            return override.read_bytes()
+        except OSError:
+            pass
+    try:
+        return resources.files("stackscan.data").joinpath("cve.json.gz").read_bytes()
+    except (FileNotFoundError, ModuleNotFoundError, OSError):
+        return None
+
+
 @lru_cache(maxsize=1)
 def load_cve_db() -> CveDb:
     empty: CveDb = {}
-    try:
-        raw = resources.files("stackscan.data").joinpath("cve.json.gz").read_bytes()
-    except (FileNotFoundError, ModuleNotFoundError, OSError):
+    raw = _cve_bytes()
+    if raw is None:
         return empty
     try:
         data = cast("dict[str, Any]", json.loads(gzip.decompress(raw)))

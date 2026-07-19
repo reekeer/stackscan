@@ -12,8 +12,13 @@ from typing import Any, cast
 from urllib.parse import urljoin
 
 SIGDB_MAGIC = b"SIGT"
-DEFAULT_SOURCE_URL = "https://db.imalive.lol/sigdb/manifest.json"
+DEFAULT_SOURCE_URL = "https://db.imalive.lol"
+DEFAULT_SIGDB_URL = "https://db.imalive.lol/sigdb"
+DEFAULT_STACKSCAN_URL = "https://db.imalive.lol/stackscan"
 _RULES_FILENAMES = ("sigdb.json", "rules.json", "signatures.json")
+_MANIFEST_REL = "sigdb/manifest.json"
+_CVE_REL = "stackscan/cve.json.gz"
+_SUBDOMAINS_REL = "stackscan/subdomains.txt"
 _DOWNLOAD_UA = "stackscan-source-manager/1.0"
 _DOWNLOAD_TIMEOUT = 30
 _MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
@@ -32,9 +37,18 @@ class Source:
     path: str
     added: int
     enabled: bool = True
+    cve: str = ""
+    subdomains: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class _Materialized:
+    sigdb: str = ""
+    cve: str = ""
+    subdomains: str = ""
 
 
 def _base_dir(env: str, default: Path) -> Path:
@@ -78,7 +92,7 @@ def _detect_kind(url: str) -> str:
         return "git"
     if url.startswith(("http://", "https://")):
         return "web"
-    if Path(url).expanduser().is_file():
+    if Path(url).expanduser().exists():
         return "path"
     return "web"
 
@@ -113,6 +127,8 @@ class SourceStore:
                         path=str(row["path"]),
                         added=int(row["added"]),
                         enabled=bool(row.get("enabled", True)),
+                        cve=str(row.get("cve", "")),
+                        subdomains=str(row.get("subdomains", "")),
                     )
                 )
             except (KeyError, ValueError, TypeError):
@@ -134,23 +150,22 @@ class SourceStore:
         source_id = _source_id(url)
         dest = self._cache / source_id
         dest.mkdir(parents=True, exist_ok=True)
-        compiled = dest / "signatures.sigdb"
         if kind == "git":
-            _materialize_git(url, dest, compiled)
-            path = compiled
+            materialized = _materialize_git(url, dest)
         elif kind == "path":
-            path = _materialize_path(url, compiled)
+            materialized = _materialize_path(url, dest)
         else:
-            _materialize_http(url, compiled)
-            path = compiled
+            materialized = _materialize_http(url, dest)
         previous = next((s for s in self.list() if s.id == source_id), None)
         source = Source(
             id=source_id,
             url=url,
             kind=kind,
-            path=str(path),
+            path=materialized.sigdb,
             added=int(time.time()),
             enabled=previous.enabled if previous else True,
+            cve=materialized.cve,
+            subdomains=materialized.subdomains,
         )
         sources = [s for s in self.list() if s.id != source_id]
         sources.append(source)
@@ -189,12 +204,30 @@ class SourceStore:
     def resolve_paths(self) -> list[Path]:
         paths: list[Path] = []
         for source in self.list():
-            if not source.enabled:
+            if not source.enabled or not source.path:
                 continue
             path = Path(source.path)
             if path.is_file():
                 paths.append(path)
         return paths
+
+    def _resolve_field(self, field: str) -> Path | None:
+        for source in self.list():
+            if not source.enabled:
+                continue
+            value = getattr(source, field, "")
+            if not value:
+                continue
+            path = Path(value)
+            if path.is_file():
+                return path
+        return None
+
+    def resolve_cve(self) -> Path | None:
+        return self._resolve_field("cve")
+
+    def resolve_subdomains(self) -> Path | None:
+        return self._resolve_field("subdomains")
 
 
 def _http_get(url: str) -> bytes:
@@ -231,53 +264,122 @@ def _compile_rules_bytes(raw: bytes, output: Path) -> None:
     build_sigdb(rules=cast("dict[str, Any]", rules), output_path=output)
 
 
-def _materialize_path(src: str, output: Path) -> Path:
-    source_file = Path(src).expanduser()
-    if not source_file.is_file():
-        raise SourceError(f"file not found: {source_file}")
-    raw = source_file.read_bytes()
+def _materialize_path(src: str, dest: Path) -> _Materialized:
+    source = Path(src).expanduser()
+    if source.is_dir():
+        sigdb, cve, subs = _scan_db_dir(source)
+        if sigdb is None:
+            raise SourceError(f"no sigdb under {source} (expected sigdb/stackscan.sigdb)")
+        return _Materialized(
+            sigdb=str(sigdb.resolve()),
+            cve=str(cve.resolve()) if cve else "",
+            subdomains=str(subs.resolve()) if subs else "",
+        )
+    if not source.is_file():
+        raise SourceError(f"file not found: {source}")
+    raw = source.read_bytes()
     if raw[:4] == SIGDB_MAGIC:
-        return source_file.resolve()
+        return _Materialized(sigdb=str(source.resolve()))
+    output = dest / "signatures.sigdb"
     _compile_rules_bytes(raw, output)
-    return output
+    return _Materialized(sigdb=str(output))
 
 
 def _manifest_sigdb_url(manifest_url: str, data: dict[str, Any]) -> str | None:
-    artifacts = data.get("artifacts")
-    if not isinstance(artifacts, dict):
-        return None
-    sigdb = cast("dict[str, Any]", artifacts).get("sigdb")
-    if not isinstance(sigdb, dict):
-        return None
-    rel = cast("dict[str, Any]", sigdb).get("path")
+    rel = data.get("path")
+    if not rel:
+        artifacts = data.get("artifacts")
+        if isinstance(artifacts, dict):
+            sigdb = cast("dict[str, Any]", artifacts).get("sigdb")
+            if isinstance(sigdb, dict):
+                rel = cast("dict[str, Any]", sigdb).get("path")
     if not rel:
         return None
     return urljoin(manifest_url, str(rel))
 
 
-def _materialize_http(url: str, output: Path) -> None:
+def _fetch_sigdb(url: str, output: Path) -> None:
     raw = _http_get(url)
-    if raw[:4] == SIGDB_MAGIC:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(raw)
-        return
+    if raw[:4] != SIGDB_MAGIC:
+        raise SourceError(f"{url} is not a .sigdb file")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(raw)
+
+
+def _fetch_optional(url: str, output: Path) -> str:
     try:
-        data = json.loads(raw)
+        raw = _http_get(url)
+    except SourceError:
+        return ""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(raw)
+    return str(output)
+
+
+def _materialize_http(url: str, dest: Path) -> _Materialized:
+    output = dest / "signatures.sigdb"
+    lower = url.lower().rstrip("/")
+    if lower.endswith(".sigdb"):
+        _fetch_sigdb(url, output)
+        return _Materialized(sigdb=str(output))
+    if lower.endswith(".json"):
+        raw = _http_get(url)
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise SourceError("source is neither a .sigdb file nor valid JSON") from exc
+        if isinstance(data, dict):
+            sigdb_url = _manifest_sigdb_url(url, cast("dict[str, Any]", data))
+            if sigdb_url:
+                _fetch_sigdb(sigdb_url, output)
+                return _Materialized(sigdb=str(output))
+        _compile_rules_bytes(raw, output)
+        return _Materialized(sigdb=str(output))
+    base = url if url.endswith("/") else url + "/"
+    manifest_url = urljoin(base, _MANIFEST_REL)
+    manifest_raw = _http_get(manifest_url)
+    try:
+        data = json.loads(manifest_raw)
     except json.JSONDecodeError as exc:
-        raise SourceError("source is neither a .sigdb file nor valid JSON") from exc
-    if isinstance(data, dict):
-        sigdb_url = _manifest_sigdb_url(url, cast("dict[str, Any]", data))
-        if sigdb_url:
-            sig_raw = _http_get(sigdb_url)
-            if sig_raw[:4] != SIGDB_MAGIC:
-                raise SourceError(f"{sigdb_url} is not a .sigdb file")
-            output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_bytes(sig_raw)
-            return
-    _compile_rules_bytes(raw, output)
+        raise SourceError(f"{manifest_url} is not valid JSON") from exc
+    sigdb_url = _manifest_sigdb_url(manifest_url, cast("dict[str, Any]", data))
+    if not sigdb_url:
+        raise SourceError(f"{manifest_url} does not reference a sigdb path")
+    _fetch_sigdb(sigdb_url, output)
+    return _Materialized(
+        sigdb=str(output),
+        cve=_fetch_optional(urljoin(base, _CVE_REL), dest / "cve.json.gz"),
+        subdomains=_fetch_optional(urljoin(base, _SUBDOMAINS_REL), dest / "subdomains.txt"),
+    )
 
 
-def _materialize_git(url: str, dest: Path, output: Path) -> None:
+def _scan_db_dir(root: Path) -> tuple[Path | None, Path | None, Path | None]:
+    sigdb: Path | None = None
+    for candidate in (root / "sigdb" / "stackscan.sigdb", root / "stackscan.sigdb"):
+        if candidate.is_file():
+            sigdb = candidate
+            break
+    if sigdb is None:
+        manifest = root / _MANIFEST_REL
+        if manifest.is_file():
+            try:
+                data = json.loads(manifest.read_text("utf-8"))
+            except (OSError, json.JSONDecodeError):
+                data = {}
+            rel = cast("dict[str, Any]", data).get("path") if isinstance(data, dict) else None
+            if rel:
+                candidate = manifest.parent / str(rel)
+                if candidate.is_file():
+                    sigdb = candidate
+    if sigdb is None:
+        found = sorted(root.rglob("*.sigdb"))
+        sigdb = found[0] if found else None
+    cve = root / _CVE_REL
+    subs = root / _SUBDOMAINS_REL
+    return sigdb, (cve if cve.is_file() else None), (subs if subs.is_file() else None)
+
+
+def _materialize_git(url: str, dest: Path) -> _Materialized:
     checkout = dest / "repo"
     _remove_tree(checkout)
     clone_url = _normalize_git_url(url)
@@ -292,16 +394,19 @@ def _materialize_git(url: str, dest: Path, output: Path) -> None:
         raise SourceError("git is not installed") from exc
     except subprocess.CalledProcessError as exc:
         raise SourceError(f"git clone failed: {exc.stderr.strip()}") from exc
-    prebuilt = sorted(checkout.rglob("*.sigdb"))
-    if prebuilt:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(prebuilt[0].read_bytes())
-        return
+    sigdb, cve, subs = _scan_db_dir(checkout)
+    if sigdb is not None:
+        return _Materialized(
+            sigdb=str(sigdb.resolve()),
+            cve=str(cve.resolve()) if cve else "",
+            subdomains=str(subs.resolve()) if subs else "",
+        )
+    output = dest / "signatures.sigdb"
     for name in _RULES_FILENAMES:
         candidate = checkout / name
         if candidate.is_file():
             _compile_rules_bytes(candidate.read_bytes(), output)
-            return
+            return _Materialized(sigdb=str(output))
     raise SourceError("repository has no .sigdb or rules JSON (sigdb.json/rules.json)")
 
 
