@@ -119,7 +119,7 @@ def test_brute_phase_skips_in_json_without_full_auto() -> None:
 
 
 def test_brute_phase_declined_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("builtins.input", lambda *_: "n")
+    monkeypatch.setattr(cli, "_prompt_line", lambda *_: "n")
     report = ScanReport(url="https://cam.test")
     report.brute_targets = [BruteTarget(host="cam.test", port=80, is_camera=True)]
     cli._run_brute_phase([report], _args(json_terminal=False), Console(), json_terminal=False)

@@ -18,7 +18,9 @@ from rich.table import Table
 from stackscan import __version__, theme
 from stackscan.analyzers import TechAnalyzer, brute_devices, summarize_edge
 from stackscan.config import (
+    DEFAULT_SIGDB_URL,
     DEFAULT_SOURCE_URL,
+    DEFAULT_STACKSCAN_URL,
     NoSignaturesError,
     SourceError,
     SourceStore,
@@ -751,25 +753,28 @@ def _brute_subject(cameras: int, devices: int) -> str:
     return " and ".join(parts) if parts else "device(s)"
 
 
-def _prompt_line(console: Console) -> str | None:
-    console.print("> ", end="")
+def _prompt_line(prompt: str) -> str | None:
+    for mode in ("r+", "r"):
+        try:
+            tty = open("/dev/tty", mode, encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        try:
+            if "+" in mode:
+                tty.write(prompt)
+                tty.flush()
+            line = tty.readline()
+        except (OSError, EOFError, KeyboardInterrupt):
+            line = ""
+        finally:
+            tty.close()
+        return line if line else None
+    sys.stderr.write(prompt)
+    sys.stderr.flush()
     try:
-        console.file.flush()
-    except Exception:
-        pass
-    tty = None
-    try:
-        tty = open("/dev/tty", encoding="utf-8", errors="replace")
-    except OSError:
-        tty = None
-    stream = tty if tty is not None else sys.stdin
-    try:
-        line = stream.readline()
+        line = sys.stdin.readline()
     except (OSError, EOFError, KeyboardInterrupt):
         line = ""
-    finally:
-        if tty is not None:
-            tty.close()
     return line if line else None
 
 
@@ -780,7 +785,7 @@ def _prompt_brute(cameras: int, devices: int, console: Console) -> bool:
         highlight=False,
     )
     while True:
-        answer = _prompt_line(console)
+        answer = _prompt_line("> ")
         if answer is None:
             return False
         answer = answer.strip().lower()
@@ -933,7 +938,8 @@ def _sigdb_command(argv: list[str]) -> int:
     add_p.add_argument(
         "url",
         nargs="?",
-        help="Source: local .sigdb/rules path, http(s) URL (.sigdb/manifest.json), or git repo."
+        help="Source: a database base URL/dir/git repo (with sigdb/ and stackscan/),"
+        " or a direct .sigdb/rules path or manifest.json."
         f" Defaults to {DEFAULT_SOURCE_URL}.",
     )
     sub.add_parser("list", help="List configured sources.")
@@ -952,21 +958,33 @@ def _sigdb_command(argv: list[str]) -> int:
         if args.action == "add":
             url = args.url or DEFAULT_SOURCE_URL
             source = store.add(url)
+            extras = [
+                name
+                for name, val in (("cve", source.cve), ("subdomains", source.subdomains))
+                if val
+            ]
+            suffix = f" (+{', '.join(extras)})" if extras else ""
             console.print(
-                f"[green]Added[/green] {url} ([cyan]{source.kind}[/cyan], id={source.id}) -> {source.path}"
+                f"[green]Added[/green] {url} ([cyan]{source.kind}[/cyan], id={source.id})"
+                f" -> {source.path}{suffix}"
             )
             return 0
         if args.action == "list":
             sources = store.list()
-            if not sources:
-                console.print("[yellow]No sources configured.[/yellow]")
-                return 0
             table = Table(title="Signature Sources")
             table.add_column("ID", style="cyan")
             table.add_column("Kind")
             table.add_column("State")
             table.add_column("URL", overflow="fold")
             table.add_column("Added")
+            if not any(s.url.rstrip("/") == DEFAULT_SOURCE_URL for s in sources):
+                table.add_row(
+                    "default",
+                    "web",
+                    f"[{theme.ACCENT}]Default[/]",
+                    f"{DEFAULT_SIGDB_URL} + {DEFAULT_STACKSCAN_URL}",
+                    "-",
+                )
             for source in sources:
                 added = datetime.fromtimestamp(source.added, UTC).strftime("%Y-%m-%d")
                 state = (
