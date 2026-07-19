@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,35 +41,8 @@ class Glyphs:
     run: str
 
 
-_ASCII = Glyphs(False, "->", ">", "-", "[+]", "[!]", "[x]", "[*]", "[?]", "*", "[~]")
-_UNICODE = Glyphs(
-    True,
-    "→",
-    "▸",
-    "·",
-    "✅",
-    "⚠️",
-    "❌",
-    "ℹ️",
-    "❓",
-    "\U0001f680",
-    "\U0001f50e",
-)
-
-
-def supports_unicode(console: Any | None = None) -> bool:
-    encoding = getattr(console, "encoding", None) if console is not None else None
-    if not encoding:
-        encoding = getattr(sys.stdout, "encoding", None) or ""
-    encoding = str(encoding).lower()
-    if "utf" in encoding:
-        return True
-    try:
-        "→▸✅".encode(encoding or "ascii")
-        return True
-    except (UnicodeEncodeError, LookupError):
-        return False
+_ASCII = Glyphs(False, "->", ">", "-", "[+]", "[!]", "[x]", "[*]", "[?]", "[>]", "[~]")
 
 
 def glyphs(console: Any | None = None) -> Glyphs:
-    return _UNICODE if supports_unicode(console) else _ASCII
+    return _ASCII
