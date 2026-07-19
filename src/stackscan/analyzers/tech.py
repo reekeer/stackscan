@@ -40,17 +40,51 @@ def _script_srcs(html: str) -> list[str]:
 _CLASS_ATTR_RE = re.compile(r'\bclass\s*=\s*"([^"]*)"|\bclass\s*=\s*\'([^\']*)\'', re.I)
 
 
-_CSS_UTILITY_EXACT: frozenset[str] = frozenset({
-    "container", "flex", "grid", "block", "inline", "inline-block", "hidden",
-    "table", "table-cell", "table-row", "flow-root", "contents",
-    "float-left", "float-right", "float-none", "clear-left", "clear-right",
-    "clear-both", "clear-none", "isolate", "isolation-auto",
-    "object-contain", "object-cover", "object-fill", "object-none", "object-scale-down",
-    "overflow-auto", "overflow-hidden", "overflow-visible", "overflow-scroll",
-    "overscroll-auto", "overscroll-contain", "overscroll-none",
-    "visible", "invisible", "collapse",
-    "static", "fixed", "absolute", "relative", "sticky",
-})
+_CSS_UTILITY_EXACT: frozenset[str] = frozenset(
+    {
+        "container",
+        "flex",
+        "grid",
+        "block",
+        "inline",
+        "inline-block",
+        "hidden",
+        "table",
+        "table-cell",
+        "table-row",
+        "flow-root",
+        "contents",
+        "float-left",
+        "float-right",
+        "float-none",
+        "clear-left",
+        "clear-right",
+        "clear-both",
+        "clear-none",
+        "isolate",
+        "isolation-auto",
+        "object-contain",
+        "object-cover",
+        "object-fill",
+        "object-none",
+        "object-scale-down",
+        "overflow-auto",
+        "overflow-hidden",
+        "overflow-visible",
+        "overflow-scroll",
+        "overscroll-auto",
+        "overscroll-contain",
+        "overscroll-none",
+        "visible",
+        "invisible",
+        "collapse",
+        "static",
+        "fixed",
+        "absolute",
+        "relative",
+        "sticky",
+    }
+)
 # Tailwind-style utilities: px-4, w-full, bg-red-500, my-auto, backdrop-blur, etc.
 _CSS_UTILITY_RE = re.compile(
     r"^[a-z]+(-[a-z]+)?-(\d+|auto|full|screen|px|sm|md|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl|none|hidden|visible|inherit|current|transparent|black|white|blur|opacity|saturate|sepia|grayscale|contrast|brightness|invert|drop-shadow|hue-rotate|shadow|sm|md|lg|xl)$",
@@ -118,7 +152,9 @@ def _confidence(evidence: list[str]) -> int:
 
 
 _VERSION_RE = re.compile(r"(\d+\.\d+(?:\.\d+)?(?:[-+.]?[a-zA-Z0-9]+)?)")
-_CORE_COMMIT_RE = re.compile(r"([A-Za-z][A-Za-z0-9\s-]*?)\s+Core\s+\(([a-f0-9]{4,})\)", re.IGNORECASE)
+_CORE_COMMIT_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9\s-]*?)\s+Core\s+\(([a-f0-9]{4,})\)", re.IGNORECASE
+)
 
 
 def _version_key(version: str) -> tuple[int, int, int, int]:
@@ -274,9 +310,7 @@ class TechAnalyzer:
             self._add(acc, matcher.match(result.body), "body")
             self._add(acc, matcher.match(result.url), "url")
             for token in _framework_tokens(result.body):
-                self._add(
-                    acc, matcher.match_search({"framework": token}), f"framework:{token}"
-                )
+                self._add(acc, matcher.match_search({"framework": token}), f"framework:{token}")
         self._curated(acc, result)
         by_name: dict[str, _Hit] = {}
         for hit in acc.values():
@@ -336,4 +370,9 @@ class TechAnalyzer:
                 add(name, "service", f"body:{name} Core ({commit})", version=commit)
 
         for tech in extract_generic_tech(result.body):
-            add(tech.name, tech.categories[0] if tech.categories else "service", tech.evidence[0], tech.version)
+            add(
+                tech.name,
+                tech.categories[0] if tech.categories else "service",
+                tech.evidence[0],
+                tech.version,
+            )

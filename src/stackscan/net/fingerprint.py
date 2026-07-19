@@ -25,7 +25,13 @@ _DISTRO_PATTERNS: tuple[tuple[re.Pattern[str], str, int | None], ...] = (
     (re.compile(r"\bubuntu\b", re.I), "Ubuntu", None),
     (re.compile(r"\+?deb(\d+)u?(\d+)?", re.I), "Debian", 1),
     (re.compile(r"\bdebian[_-]?(\d[\d._]*)?", re.I), "Debian", 1),
-    (re.compile(r"\b(red\s*hat(?:\s*enterprise\s*linux|\s*linux)?|rhel)[-_\s]?(\d[\d._]*)?", re.I), "Red Hat", 2),
+    (
+        re.compile(
+            r"\b(red\s*hat(?:\s*enterprise\s*linux|\s*linux)?|rhel)[-_\s]?(\d[\d._]*)?", re.I
+        ),
+        "Red Hat",
+        2,
+    ),
     (re.compile(r"\bcentos[-_\s]?(\d[\d._]*)?", re.I), "CentOS", 1),
     (re.compile(r"\bfedora[-_\s]?(\d[\d._]*)?", re.I), "Fedora", 1),
     (re.compile(r"\brocky\s*linux?[-_\s]?(\d[\d._]*)?", re.I), "Rocky Linux", 1),

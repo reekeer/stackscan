@@ -124,7 +124,9 @@ def _service_for_cname(cname: str) -> _TakeoverTarget | None:
     return None
 
 
-async def _fetch_url(name: str, session: Any, timeout: float, user_agent: str) -> FetchResult | None:
+async def _fetch_url(
+    name: str, session: Any, timeout: float, user_agent: str
+) -> FetchResult | None:
     from stackscan.core import StackscanSession
 
     s = cast(StackscanSession, session)
@@ -172,8 +174,7 @@ async def _verify_takeover(
     # the dangling CNAME is likely unclaimed.
     final_host = (host_of(result.url) or "").lower()
     if result.status in (404, 406) and any(
-        final_host.endswith("." + suffix) or final_host == suffix
-        for suffix in target.suffixes
+        final_host.endswith("." + suffix) or final_host == suffix for suffix in target.suffixes
     ):
         return (True, f"HTTP {result.status} on {target.service}")
     return (False, "")

@@ -24,7 +24,9 @@ _SECRET_PATTERNS: tuple[_SecretPattern, ...] = (
     ),
     _SecretPattern(
         name="GitHub personal access token",
-        regex=re.compile(r"\b(ghp_[A-Za-z0-9_]{36}|github_pat_[A-Za-z0-9_]{22}_[A-Za-z0-9_]{59}|gho_[A-Za-z0-9_]{36}|ghu_[A-Za-z0-9_]{36}|ghs_[A-Za-z0-9_]{36}|ghr_[A-Za-z0-9_]{36})\b"),
+        regex=re.compile(
+            r"\b(ghp_[A-Za-z0-9_]{36}|github_pat_[A-Za-z0-9_]{22}_[A-Za-z0-9_]{59}|gho_[A-Za-z0-9_]{36}|ghu_[A-Za-z0-9_]{36}|ghs_[A-Za-z0-9_]{36}|ghr_[A-Za-z0-9_]{36})\b"
+        ),
     ),
     _SecretPattern(
         name="Slack token",
@@ -32,11 +34,15 @@ _SECRET_PATTERNS: tuple[_SecretPattern, ...] = (
     ),
     _SecretPattern(
         name="Slack webhook",
-        regex=re.compile(r"(https://hooks\.slack\.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{10,}/[a-zA-Z0-9_]{24,})"),
+        regex=re.compile(
+            r"(https://hooks\.slack\.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{10,}/[a-zA-Z0-9_]{24,})"
+        ),
     ),
     _SecretPattern(
         name="Private key",
-        regex=re.compile(r"(-----BEGIN (RSA |OPENSSH |DSA |EC |PGP )?PRIVATE KEY-----[\s\S]{60,200}-----END (RSA |OPENSSH |DSA |EC |PGP )?PRIVATE KEY-----)"),
+        regex=re.compile(
+            r"(-----BEGIN (RSA |OPENSSH |DSA |EC |PGP )?PRIVATE KEY-----[\s\S]{60,200}-----END (RSA |OPENSSH |DSA |EC |PGP )?PRIVATE KEY-----)"
+        ),
         severity="CRITICAL",
     ),
     _SecretPattern(
@@ -49,7 +55,10 @@ _SECRET_PATTERNS: tuple[_SecretPattern, ...] = (
     ),
     _SecretPattern(
         name="Database URL",
-        regex=re.compile(r"\b((?:postgres|postgresql|mysql|mongodb|redis|amqp)://[^\s\"'<>]{8,})\b", re.IGNORECASE),
+        regex=re.compile(
+            r"\b((?:postgres|postgresql|mysql|mongodb|redis|amqp)://[^\s\"'<>]{8,})\b",
+            re.IGNORECASE,
+        ),
         severity="CRITICAL",
     ),
     _SecretPattern(
@@ -60,9 +69,7 @@ _SECRET_PATTERNS: tuple[_SecretPattern, ...] = (
     ),
     _SecretPattern(
         name="Password in JS/config",
-        regex=re.compile(
-            r"(?i)(?:password|passwd|pwd)\s*[:=]\s*['\"]([^'\"\s]{4,})['\"]"
-        ),
+        regex=re.compile(r"(?i)(?:password|passwd|pwd)\s*[:=]\s*['\"]([^'\"\s]{4,})['\"]"),
         severity="MEDIUM",
     ),
 )
