@@ -623,14 +623,15 @@ async def _vhost_catch_all(
     options: ScanOptions,
 ) -> set[tuple[str, int, bool]]:
     if not apex:
-        return set()
+        return set(targets)
 
     async def check(target: tuple[str, int, bool]) -> tuple[str, int, bool] | None:
         baseline = baselines.get(target)
         if baseline is None or baseline[0] is None:
-            return None
+            return target
         ip, port, tls = target
-        for _ in range(2):
+        seen_status: int | None = None
+        for _ in range(3):
             name = f"{secrets.token_hex(10)}.{apex}"
             vname, status, location, indicator = await _probe_vhost(
                 session,
@@ -643,7 +644,13 @@ async def _vhost_catch_all(
                 options.max_bytes,
                 baseline[0],
             )
+            if status is None:
+                continue
             if _vhost_matches(status, location, indicator, vname, baseline[0]):
+                return target
+            if seen_status is None:
+                seen_status = status
+            elif seen_status != status:
                 return target
         return None
 

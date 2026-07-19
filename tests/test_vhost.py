@@ -147,6 +147,42 @@ def test_discover_vhosts_skips_catch_all_ip() -> None:
     assert found == []
 
 
+class _FlakySession:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, str] | None]] = []
+        self._n = 0
+
+    async def fetch(
+        self,
+        url: str,
+        *,
+        timeout: float,
+        user_agent: str,
+        insecure: bool,
+        max_bytes: int,
+        headers: dict[str, str] | None = None,
+        allow_redirects: bool = True,
+    ) -> FetchResult:
+        self.calls.append((url, headers))
+        host = headers.get("Host") if headers else None
+        if host is None:
+            status = 200
+        else:
+            self._n += 1
+            status = 503 if self._n % 2 else 403
+        return FetchResult(
+            url=url, status=status, headers={"_raw": ""}, body="", cookies=(), http_version="1.1"
+        )
+
+
+def test_discover_vhosts_skips_flaky_unknown_host_ip() -> None:
+    report = _make_report()
+    options = _options()
+    session = _FlakySession()
+    found = asyncio.run(discover_vhosts(report, session, options))  # type: ignore[arg-type]
+    assert found == []
+
+
 def test_discover_vhosts_respects_full_flag() -> None:
     report = _make_report()
     options = ScanOptions(
