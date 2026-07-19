@@ -57,13 +57,17 @@ def test_no_duplicates_for_same_service() -> None:
 
 def test_generic_web_server_tech_does_not_emit_service_finding() -> None:
     report = ScanReport(url="https://a.test")
-    report.technologies = [Technology(name="nginx", categories=("infrastructure",), evidence=("body:nginx/1.24.0",))]
+    report.technologies = [
+        Technology(name="nginx", categories=("infrastructure",), evidence=("body:nginx/1.24.0",))
+    ]
     services = classify_services(report)
     assert not any(s.name == "nginx" for s in services)
 
 
 def test_generic_application_tech_does_not_emit_service_finding() -> None:
     report = ScanReport(url="https://a.test")
-    report.technologies = [Technology(name="CurseForge", categories=("service",), evidence=("body:powered-by",))]
+    report.technologies = [
+        Technology(name="CurseForge", categories=("service",), evidence=("body:powered-by",))
+    ]
     services = classify_services(report)
     assert not any(s.name == "CurseForge" for s in services)

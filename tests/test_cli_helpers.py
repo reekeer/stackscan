@@ -45,6 +45,3 @@ def test_read_targets_prepends_positional_targets(tmp_path: Path) -> None:
 def test_read_targets_missing_file_raises() -> None:
     with pytest.raises(FileNotFoundError):
         _read_targets(Path("does-not-exist-xyz.txt"), [])
-
-
-

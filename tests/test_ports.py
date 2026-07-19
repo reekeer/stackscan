@@ -57,7 +57,9 @@ def _mysql_handshake(version: str) -> bytes:
     payload.append(0x00)
     payload.extend(b"\x00" * 20)
     length = len(payload)
-    return bytes([length & 0xFF, (length >> 8) & 0xFF, (length >> 16) & 0xFF, 0x00]) + bytes(payload)
+    return bytes([length & 0xFF, (length >> 8) & 0xFF, (length >> 16) & 0xFF, 0x00]) + bytes(
+        payload
+    )
 
 
 def test_fingerprint_mysql_mariadb_with_ubuntu_suffix() -> None:
