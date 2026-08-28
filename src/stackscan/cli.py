@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import time
 from collections.abc import Iterable
@@ -26,17 +27,37 @@ from stackscan.config import (
     SourceStore,
     build_matchers,
 )
+from stackscan.embed import document as reekeer_document
 from stackscan.net import GeoProvider, nmap_available
 from stackscan.render import render_banner, render_reports
 from stackscan.scan import ScanOptions, StageLog, scan_target, stage_total
 from stackscan.types import BruteTarget, CredFinding, DetectedTech, ScanReport
 from stackscan.utils import expand_cidr, is_cidr, normalize_url
 
+try:  # The SDK reekeer puts on `sys.path`. Absent when stackscan runs as its own console script.
+    from reekeer import is_reekeer  # type: ignore[import-not-found]
+except ImportError:
+    # Reading the variable directly keeps the answer right even without the SDK: it is what the SDK
+    # reads too, and reekeer exports it when it spawns the worker.
+    is_reekeer = bool(os.environ.get("REEKEER"))
+
+try:  # Added to the SDK later than the rest of it, so an older reekeer has everything but this.
+    from reekeer import progress as _reekeer_progress  # type: ignore[import-not-found]
+except ImportError:
+    _reekeer_progress = None
+
 DEFAULT_TIMEOUT = 12.0
 DEFAULT_MAX_BYTES = 1000000
 DEFAULT_CONCURRENCY = 10
 DEFAULT_WORKERS = 350
 DEFAULT_USER_AGENT = "stackscan/2.0 (+https://github.com/reekeer/stackscan)"
+
+# True only while a `rich` live progress display owns the screen. `rich.Progress` redirects
+# `sys.stderr` through a proxy that reprints whatever is written to it as a line *above* the bar —
+# so a raw window-title escape written mid-scan does not retitle the window, it prints
+# `]0;stackscan …` as visible text once per stage, one dead line each. The bar already names the
+# stage, so the title simply holds until the display is torn down.
+_live_display = False
 
 
 @lru_cache(maxsize=1)
@@ -52,7 +73,8 @@ class _HelpAction(argparse.Action):
         values: object,
         option_string: str | None = None,
     ) -> None:
-        render_banner(Console())
+        if not is_reekeer:
+            render_banner(Console())
         parser.print_help()
         parser.exit()
 
@@ -331,48 +353,93 @@ async def _expand_wildcards(raw_targets: list[str], workers: int) -> list[str]:
     return out
 
 
+def _bar(label: str, total: int | None = None) -> Any:
+    """A reekeer progress bar, or `None` when there is nobody to draw one.
+
+    Nothing here needs to know whether it got one — every caller treats `None` as "do not report",
+    which is also what happens standalone and under a reekeer too old to have `reekeer.progress`.
+    """
+    if _reekeer_progress is None:
+        return None
+    try:
+        return _reekeer_progress.bar(label, total=total)
+    except Exception:
+        # Reporting progress is not what stackscan is for. It must never be the reason a scan fails.
+        return None
+
+
 class _StageTracker:
-    def __init__(self, progress_obj: Progress, task_id: Any, target: str, total: int) -> None:
+    """Where one target has got to, reported to whichever of the two is watching.
+
+    Standalone that is `rich`, drawn into this terminal. Under reekeer it is `reekeer.progress`,
+    which is the same numbers said rather than drawn — and it has to be said, because a `rich` live
+    display is *cursor movement*: pointed at anything that is not a terminal it renders nothing at
+    all, which is what a two-minute scan looked like in reekeer's window, and forced it would send a
+    frame of escape sequences per update into a log that cannot replay them.
+
+    Both are optional and the two are independent: `progress_obj` is `None` inside reekeer, `bar` is
+    `None` outside it, and either being absent leaves the other doing all the work.
+    """
+
+    def __init__(
+        self,
+        progress_obj: Progress | None,
+        task_id: Any,
+        target: str,
+        total: int,
+        bar: Any = None,
+    ) -> None:
         self._progress = progress_obj
         self._task_id = task_id
         self._target = target
         self._index = 0
         self._total = total
         self._host = target.split("://", 1)[-1]
+        self._bar = bar
 
     def _title(self, message: str) -> None:
         _set_title(f"stackscan {self._index}/{self._total} · {self._host} · {message}")
 
-    def stage(self, message: str) -> None:
-        self._index += 1
-        self._progress.update(
-            self._task_id,
-            advance=1,
-            description=f"{_glyphs().run} {self._target} {_glyphs().bullet} {message}",
-        )
+    def _draw(self, message: str, advance: int = 0) -> None:
+        if self._progress is not None:
+            self._progress.update(
+                self._task_id,
+                advance=advance,
+                description=f"{_glyphs().run} {self._target} {_glyphs().bullet} {message}",
+            )
+        if self._bar is not None:
+            # The host, not the URL: reekeer draws the label in a pane a few inches wide, and the
+            # scheme is the part of it that never varies between one line and the next.
+            self._bar.advance(advance, f"{self._host} {_glyphs().bullet} {message}")
         self._title(message)
 
+    def stage(self, message: str) -> None:
+        self._index += 1
+        self._draw(message, advance=1)
+
     def info(self, message: str) -> None:
-        self._progress.update(
-            self._task_id,
-            description=f"{_glyphs().run} {self._target} {_glyphs().bullet} {message}",
-        )
-        self._title(message)
+        self._draw(message)
 
     def reserve(self, extra: int) -> None:
         if extra <= 0:
             return
         self._total += extra
-        self._progress.update(self._task_id, total=self._total)
+        if self._progress is not None:
+            self._progress.update(self._task_id, total=self._total)
+        if self._bar is not None:
+            # Work found half-way through, not work miscounted: a scan that discovers forty
+            # subdomains has more to do, and a bar pinned at 100% for the rest of it says less than
+            # one that walks backwards.
+            self._bar.grow(extra)
 
     def advance(self, message: str, *, steps: int = 1) -> None:
         self._index += steps
-        self._progress.update(
-            self._task_id,
-            advance=steps,
-            description=f"{_glyphs().run} {self._target} {_glyphs().bullet} {message}",
-        )
-        self._title(message)
+        self._draw(message, advance=steps)
+
+    def done(self, message: str) -> None:
+        """This target is finished. Only reekeer's bar has anything to take down."""
+        if self._bar is not None:
+            self._bar.done(message)
 
 
 async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
@@ -449,15 +516,20 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
         progress_obj: Progress | None = None,
         task_id: Any | None = None,
         target_total: int = 1,
+        bar: Any = None,
     ) -> ScanReport:
         nonlocal completed
         if args.verbose == 1:
             err_console.print(f"[{theme.MUTED}]{_glyphs().run} Starting scan of {target}...[/]")
 
+        tracker: _StageTracker | None = None
         stage_log: StageLog | None = None
-        if staged and progress_obj is not None and task_id is not None:
-            stage_log = _StageTracker(progress_obj, task_id, target, target_total)
-            stage_log.info("starting...")
+        # A reekeer bar is enough on its own: inside the shell there is no `rich` display to attach
+        # to, and it is the thing being drawn.
+        if staged and (bar is not None or (progress_obj is not None and task_id is not None)):
+            tracker = _StageTracker(progress_obj, task_id, target, target_total, bar)
+            stage_log = tracker
+            tracker.info("starting...")
 
         report = await scan_target(
             target,
@@ -504,6 +576,14 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
                 )
             else:
                 progress_obj.update(task_id, advance=1, description=f"Scanning: {target}")
+        if tracker is not None:
+            # Taken down rather than left full: what says this target is finished is the report about
+            # to be drawn under it, and a screen of completed bars is a worse copy of that.
+            host = target.split("://", 1)[-1]
+            tracker.done(f"{host} {_glyphs().bullet} {summary_str or 'done'}")
+        elif bar is not None:
+            # The unstaged shape: one bar over all the targets, one step per target finished.
+            bar.advance(1, f"{completed}/{total_targets} · {target}")
 
         return report
 
@@ -516,7 +596,33 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
     semaphore = asyncio.Semaphore(max(args.concurrency, 1))
     _set_title(f"stackscan · scanning {total_targets} target(s)")
     async with StackscanSession() as session:
+        if is_reekeer and not is_json_terminal():
+            # No `rich` display in here at all, rather than one nobody can see. Its console is not a
+            # terminal inside the shell, so `Progress` draws nothing while it runs and — when it is
+            # not transient — prints one dead frame of finished bars at the end, into a log. reekeer
+            # is told the numbers instead and draws them itself, in the window and in its own prompt.
+            if staged:
+                # The host, not the URL, and from the first frame: the scheme is the part of the
+                # label that never varies, and a bar that renames itself after one step reads as
+                # two different bars.
+                bars = [_bar(target.split("://", 1)[-1], per_target_total) for target in targets]
+                tasks = [
+                    scan_one(target, None, None, per_target_total, bar)
+                    for target, bar in zip(targets, bars, strict=True)
+                ]
+                return list(await asyncio.gather(*tasks))
+            shared = _bar(f"scanning {total_targets} targets", total_targets)
+            try:
+                return list(
+                    await asyncio.gather(
+                        *(scan_one(target, None, None, 1, shared) for target in targets)
+                    )
+                )
+            finally:
+                if shared is not None:
+                    shared.done(f"{total_targets} target(s) scanned")
         if not is_json_terminal():
+            global _live_display
             transient = args.verbose == 0
             with Progress(
                 TextColumn("[progress.description]{task.description}"),
@@ -526,19 +632,23 @@ async def _run_scans(args: argparse.Namespace) -> list[ScanReport]:
                 console=err_console,
                 transient=transient,
             ) as progress:
-                if staged:
-                    task_ids = {
-                        target: progress.add_task(f"[~] {target}", total=per_target_total)
-                        for target in targets
-                    }
-                    tasks = [
-                        scan_one(target, progress, task_ids[target], per_target_total)
-                        for target in targets
-                    ]
-                else:
-                    task_id = progress.add_task("Scanning targets...", total=total_targets)
-                    tasks = [scan_one(target, progress, task_id) for target in targets]
-                return list(await asyncio.gather(*tasks))
+                _live_display = True
+                try:
+                    if staged:
+                        task_ids = {
+                            target: progress.add_task(f"[~] {target}", total=per_target_total)
+                            for target in targets
+                        }
+                        tasks = [
+                            scan_one(target, progress, task_ids[target], per_target_total)
+                            for target in targets
+                        ]
+                    else:
+                        task_id = progress.add_task("Scanning targets...", total=total_targets)
+                        tasks = [scan_one(target, progress, task_id) for target in targets]
+                    return list(await asyncio.gather(*tasks))
+                finally:
+                    _live_display = False
         else:
             tasks = [scan_one(target) for target in targets]
             return list(await asyncio.gather(*tasks))
@@ -715,6 +825,12 @@ def _error(console: Console, message: str) -> None:
 
 
 def _set_title(title: str) -> None:
+    # Renaming the window belongs to a program that owns the terminal. Under reekeer the shell owns it,
+    # and the escape sequence would travel through the worker's pipe as text for the terminal to print.
+    # While a live progress bar is up the escape is worse than useless: `rich` redirects stderr and
+    # reprints the sequence as a literal `]0;…` line, so it is held until the display comes down.
+    if is_reekeer or _live_display:
+        return
     try:
         if sys.stderr.isatty():
             sys.stderr.write(f"\x1b]0;{title}\x07")
@@ -724,6 +840,9 @@ def _set_title(title: str) -> None:
 
 
 def _bell() -> None:
+    # Likewise: inside the shell the prompt coming back is the notification.
+    if is_reekeer:
+        return
     try:
         if sys.stderr.isatty():
             sys.stderr.write("\a")
@@ -754,28 +873,41 @@ def _brute_subject(cameras: int, devices: int) -> str:
 
 
 def _prompt_line(prompt: str) -> str | None:
-    for mode in ("r+", "r"):
-        try:
-            tty = open("/dev/tty", mode, encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        try:
-            if "+" in mode:
-                tty.write(prompt)
-                tty.flush()
-            line = tty.readline()
-        except (OSError, EOFError, KeyboardInterrupt):
-            line = ""
-        finally:
-            tty.close()
-        return line if line else None
-    sys.stderr.write(prompt)
-    sys.stderr.flush()
+    # Never inside the shell. reekeer owns no terminal for the answer to come back through, and the
+    # worker's stdin is the protocol channel — reading a line from it would swallow the next request
+    # the daemon sent. A hosted run decides brute up front, from the form, not with a prompt mid-scan.
+    if is_reekeer:
+        return None
+    # Separate read and write handles on the controlling terminal, not one `r+`: a single read/write
+    # text handle swallowed the `> ` — it never reached the screen before the read blocked — so the
+    # prompt looked like it did nothing. The terminal keeps the answer flowing even when stdout/stderr
+    # are redirected; stderr/stdin stand in only when there is no `/dev/tty` at all.
+    tty_out = _open_tty("w")
+    tty_in = _open_tty("r")
+    writer = tty_out or sys.stderr
+    reader = tty_in or sys.stdin
     try:
-        line = sys.stdin.readline()
+        writer.write(prompt)
+        writer.flush()
+    except (OSError, ValueError):
+        pass
+    try:
+        line = reader.readline()
     except (OSError, EOFError, KeyboardInterrupt):
         line = ""
+    finally:
+        if tty_out is not None:
+            tty_out.close()
+        if tty_in is not None:
+            tty_in.close()
     return line if line else None
+
+
+def _open_tty(mode: str) -> Any:
+    try:
+        return open("/dev/tty", mode, encoding="utf-8", errors="replace")
+    except OSError:
+        return None
 
 
 def _prompt_brute(cameras: int, devices: int, console: Console) -> bool:
@@ -797,7 +929,9 @@ def _prompt_brute(cameras: int, devices: int, console: Console) -> bool:
 
 
 async def _brute_pairs(
-    pairs: list[tuple[ScanReport, BruteTarget]], args: argparse.Namespace
+    pairs: list[tuple[ScanReport, BruteTarget]],
+    args: argparse.Namespace,
+    on_done: Any = None,
 ) -> list[tuple[ScanReport, list[CredFinding]]]:
     semaphore = asyncio.Semaphore(max(args.concurrency, 1))
 
@@ -809,9 +943,60 @@ async def _brute_pairs(
                 workers=max(args.workers // 10, 4),
                 cred_limit=max(args.cred_limit, 0),
             )
+        if on_done is not None:
+            on_done(findings)
         return (report, findings)
 
     return list(await asyncio.gather(*(one(report, target) for report, target in pairs)))
+
+
+def _run_brute(
+    pairs: list[tuple[ScanReport, BruteTarget]], args: argparse.Namespace, console: Console
+) -> None:
+    """Brute the pairs with a live bar, so a long check reads as working rather than hung."""
+    from rich.progress import BarColumn, MofNCompleteColumn, SpinnerColumn, TextColumn
+
+    hits = 0
+    progress: Progress | None = None
+    task: Any = None
+    if console.is_terminal:
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            console=console,
+            transient=True,
+        )
+
+    def on_done(findings: list[CredFinding]) -> None:
+        nonlocal hits
+        hits += sum(1 for f in findings if f.kind in ("default-creds", "open-no-auth"))
+        if progress is not None:
+            progress.advance(task)
+
+    if progress is not None:
+        with progress:
+            task = progress.add_task(
+                f"{_glyphs().run} brute-forcing {len(pairs)} target(s)", total=len(pairs)
+            )
+            results = asyncio.run(_brute_pairs(pairs, args, on_done))
+    else:
+        results = asyncio.run(_brute_pairs(pairs, args, on_done))
+    for report, findings in results:
+        report.creds.extend(findings)
+    if hits:
+        console.print(
+            f"[{theme.DANGER}]{_glyphs().warn}[/] {hits} default-credential / open-device"
+            f" finding(s) across {len(pairs)} target(s)",
+            highlight=False,
+        )
+    else:
+        console.print(
+            f"[{theme.SUCCESS}]{_glyphs().ok}[/] no default credentials found on"
+            f" {len(pairs)} target(s)",
+            highlight=False,
+        )
 
 
 def _sort_creds(pairs: list[tuple[ScanReport, BruteTarget]]) -> None:
@@ -831,7 +1016,10 @@ def _run_brute_phase(
     devices = len(pairs) - cameras
     if args.full_auto:
         accept = True
-    elif json_terminal:
+    # No mid-scan prompt where there is no terminal to answer it: piped JSON, and the shell. Under
+    # reekeer the choice is `--full-auto`, a switch in the form, made before the scan runs rather than
+    # a modal half-way through it — the same reason the window title and the bell are left alone.
+    elif json_terminal or is_reekeer:
         accept = False
     else:
         accept = _prompt_brute(cameras, devices, console)
@@ -847,12 +1035,11 @@ def _run_brute_phase(
             )
         _sort_creds(pairs)
         return
-    for report, findings in asyncio.run(_brute_pairs(pairs, args)):
-        report.creds.extend(findings)
+    _run_brute(pairs, args, console)
     _sort_creds(pairs)
 
 
-def _scan_command(argv: list[str]) -> int:
+def _scan_command(argv: list[str]) -> int | dict[str, Any]:
     _increase_nofile_limit()
     verbose_level, argv = _extract_verbose(argv)
     parser = _build_scan_parser()
@@ -860,7 +1047,10 @@ def _scan_command(argv: list[str]) -> int:
     args.verbose = verbose_level
     err_console = Console(stderr=True)
     _apply_disable(args, err_console)
-    if not getattr(args, "no_banner", False):
+    # The shell already printed its own wordmark when it started; a second one per command would be
+    # noise, and a tool announcing itself is exactly what makes it look like a script being shelled out
+    # to rather than a command belonging to the shell.
+    if not getattr(args, "no_banner", False) and not is_reekeer:
         render_banner(err_console)
     if (
         (args.ports or args.full)
@@ -912,6 +1102,11 @@ def _scan_command(argv: list[str]) -> int:
         )
     if json_terminal:
         _render_json(reports, elapsed, include_graph=args.graph)
+    elif is_reekeer:
+        # Hand the findings back as data and let the shell draw them, so stackscan and every other
+        # plugin in it share one set of tables, colours and glyphs. `--export json-t` still wins: asking
+        # for machine-readable output means you want exactly that, not a rendering of it.
+        return reekeer_document(reports, elapsed, compact=args.compact)
     elif args.compact:
         _render_table(reports, args.show_empty)
         err_console.print(_scan_summary(reports, elapsed))
@@ -1023,11 +1218,36 @@ def _sigdb_command(argv: list[str]) -> int:
     return 2
 
 
-def main(argv: Iterable[str] | None = None) -> int:
+def _wants_runner(args: list[str]) -> bool:
+    """Runner mode, asked for by flag or by environment.
+
+    Read here rather than in `runner.py` so the module — and `aiohttp` with it — is only imported when
+    somebody actually wants a worker.
+    """
+    if "--runner" in args:
+        return True
+    return os.environ.get("STACKSCAN_RUNNER", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def main(argv: Iterable[str] | None = None) -> int | dict[str, Any]:
     args = list(argv) if argv is not None else sys.argv[1:]
     try:
         if args and args[0] == "sigdb":
             return _sigdb_command(args[1:])
+        if _wants_runner(args):
+            # The runner is a loop that claims jobs until it is killed. Inside the shell it would hold
+            # a worker for the rest of the session and answer nothing, so it is refused here rather
+            # than started and then wondered about.
+            if is_reekeer:
+                _error(
+                    Console(stderr=True),
+                    "runner mode is a long-running worker; start it outside the shell "
+                    "with `stackscan --runner`",
+                )
+                return 2
+            from stackscan.runner import main as runner_main
+
+            return runner_main([a for a in args if a != "--runner"])
         if args and args[0] == "scan":
             args = args[1:]
         return _scan_command(args)

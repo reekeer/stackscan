@@ -127,6 +127,29 @@ def test_brute_phase_declined_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     assert any(f.detail == "brute-force skipped" for f in report.creds)
 
 
+def test_brute_phase_skips_under_reekeer_without_a_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The shell has no terminal for a y/n to come back through, and the worker's stdin is the protocol
+    # channel — so there is no prompt at all, and a discovered device is left found but untried unless
+    # `--full-auto` said otherwise up front, from the form.
+    monkeypatch.setattr(cli, "is_reekeer", True)
+    monkeypatch.setattr(
+        cli,
+        "_prompt_line",
+        lambda *_: pytest.fail("a hosted run must never prompt"),
+    )
+    report = ScanReport(url="https://cam.test")
+    report.brute_targets = [BruteTarget(host="cam.test", port=80, is_camera=True)]
+    cli._run_brute_phase([report], _args(json_terminal=False), Console(), json_terminal=False)
+    assert any(f.detail == "brute-force skipped" for f in report.creds)
+
+
+def test_prompt_line_never_touches_stdin_under_reekeer(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Reading the worker's stdin would swallow the next request the daemon sent — the guard is before
+    # any file is opened, so even a future caller cannot trip it.
+    monkeypatch.setattr(cli, "is_reekeer", True)
+    assert cli._prompt_line("> ") is None
+
+
 def test_brute_phase_full_auto_runs_brute(monkeypatch: pytest.MonkeyPatch) -> None:
     report = ScanReport(url="https://cam.test")
     target = BruteTarget(host="cam.test", port=80, service="http (cam)", is_camera=True)
@@ -149,4 +172,27 @@ def test_brute_phase_full_auto_runs_brute(monkeypatch: pytest.MonkeyPatch) -> No
     cli._run_brute_phase(
         [report], _args(full_auto=True, json_terminal=False), Console(), json_terminal=False
     )
+    assert any(f.kind == "default-creds" and f.username == "admin" for f in report.creds)
+
+
+def test_brute_phase_accepts_prompt_and_runs_brute(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli, "_prompt_line", lambda *_: "y")
+
+    async def fake_brute(targets: list[BruteTarget], **_: Any) -> list[CredFinding]:
+        return [
+            CredFinding(
+                target=t.target,
+                service=t.service,
+                kind="default-creds",
+                detail="default credentials accepted",
+                username="admin",
+                password="admin",
+            )
+            for t in targets
+        ]
+
+    monkeypatch.setattr(cli, "brute_devices", fake_brute)
+    report = ScanReport(url="https://cam.test")
+    report.brute_targets = [BruteTarget(host="cam.test", port=80, is_camera=True)]
+    cli._run_brute_phase([report], _args(json_terminal=False), Console(), json_terminal=False)
     assert any(f.kind == "default-creds" and f.username == "admin" for f in report.creds)

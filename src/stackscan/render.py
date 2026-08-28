@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from functools import lru_cache
 from urllib.parse import urljoin
 
@@ -298,20 +299,30 @@ _GLOBAL_CATEGORIES: frozenset[str] = frozenset({"edge", "cdn", "waf", "proxy", "
 def _tech_section(report: ScanReport) -> RenderableType | None:
     all_techs = report.all_technologies()
     primary = host_of(report.url)
-    rows: list[tuple[str, str, str, str, str]] = []
-    seen: set[tuple[str, str | None, str]] = set()
+    # One group per (name, version, category): the same stack found on twenty subdomains is one
+    # finding, not twenty rows — the hosts collapse into a list in its cell.
+    groups: dict[tuple[str, str | None, str], _TechGroup] = {}
+    order: list[tuple[str, str | None, str]] = []
+    seen: set[tuple[str, str | None, str, str]] = set()
 
     def _add_row(name: str, version: str | None, category: str, host: str, confidence: int) -> None:
         global_cat = any(cat in _GLOBAL_CATEGORIES for cat in category.split(", "))
         host_cell = host or primary or "-"
+        # Edge/CDN/protocol findings are a property of the site, not of one host, so they collapse to
+        # a single entry keyed on the primary host regardless of where each header was seen.
         if global_cat:
-            key = (name.lower(), version, "")
-        else:
-            key = (name.lower(), version, host)
-        if key in seen:
+            host_cell = primary or host_cell
+        dedup = (name.lower(), version, category, host_cell)
+        if dedup in seen:
             return
-        seen.add(key)
-        rows.append((name, version or "-", category, host_cell, f"{confidence}%"))
+        seen.add(dedup)
+        key = (name.lower(), version, category)
+        group = groups.get(key)
+        if group is None:
+            group = _TechGroup(name=name, version=version, category=category)
+            groups[key] = group
+            order.append(key)
+        group.add(host_cell, confidence)
 
     for tech in all_techs:
         category = ", ".join(tech.categories) if tech.categories else "uncategorized"
@@ -323,10 +334,10 @@ def _tech_section(report: ScanReport) -> RenderableType | None:
     for sw in all_software:
         _add_row(sw.name, sw.version, "software", sw.location, 100)
 
-    if not rows:
+    if not groups:
         return None
 
-    rows.sort(key=lambda r: (r[2].lower(), r[0].lower(), _version_key(r[1])))
+    order.sort(key=lambda k: (k[2].lower(), k[0].lower(), _version_key(k[1] or "")))
 
     table = Table(box=None, pad_edge=False)
     table.add_column("Name", style="bold cyan", overflow="fold")
@@ -334,9 +345,45 @@ def _tech_section(report: ScanReport) -> RenderableType | None:
     table.add_column("Category", style="bold magenta", no_wrap=True)
     table.add_column("Host", overflow="fold")
     table.add_column("Conf", justify="right", no_wrap=True)
-    for row in rows:
-        table.add_row(*row)
+    for key in order:
+        group = groups[key]
+        table.add_row(
+            group.name,
+            group.version or "-",
+            group.category,
+            group.hosts_cell(primary),
+            group.conf_cell(),
+        )
     return table
+
+
+@dataclass
+class _TechGroup:
+    name: str
+    version: str | None
+    category: str
+    _hosts: list[str] = field(default_factory=list[str])
+    _seen: set[str] = field(default_factory=set[str])
+    _min_conf: int = 100
+    _max_conf: int = 0
+
+    def add(self, host: str, confidence: int) -> None:
+        if host not in self._seen:
+            self._seen.add(host)
+            self._hosts.append(host)
+        self._min_conf = min(self._min_conf, confidence)
+        self._max_conf = max(self._max_conf, confidence)
+
+    def hosts_cell(self, primary: str) -> str:
+        # Primary host first, then the rest alphabetically, one per line.
+        rest = sorted(h for h in self._hosts if h != primary)
+        ordered = ([primary] if primary in self._hosts else []) + rest
+        return "\n".join(ordered) if ordered else "-"
+
+    def conf_cell(self) -> str:
+        if self._min_conf == self._max_conf:
+            return f"{self._max_conf}%"
+        return f"{self._min_conf}-{self._max_conf}%"
 
 
 def _sev_text(severity: str) -> Text:

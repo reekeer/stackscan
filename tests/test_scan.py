@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
+from stackscan.net.dns import DnsResult
 from stackscan.scan import ScanOptions, _fetch_with_fallback, stage_total
 from stackscan.types import FetchResult, ScanReport
 
@@ -97,3 +100,50 @@ def test_fetch_with_fallback_retries_insecure_https() -> None:
     assert session.calls[0] == ("https://1.2.3.4", False)
     assert session.calls[1] == ("https://1.2.3.4", True)
     assert report.error is None
+
+
+def _empty_dns(host: str, **_: object) -> DnsResult:
+    return DnsResult(host=host, ipv4=(), ipv6=(), cname=(), reverse_dns={})
+
+
+def test_resolve_network_seeds_bare_ipv4_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    from stackscan import scan
+    from stackscan.net import GeoProvider
+    from stackscan.scan import _collect_ips, _resolve_network
+
+    monkeypatch.setattr(scan, "resolve_host", _empty_dns)
+    net = asyncio.run(_resolve_network("192.0.2.1", _opts(geo=False), GeoProvider(None)))
+    assert net is not None
+    assert "192.0.2.1" in net.ipv4
+    report = ScanReport(url="https://192.0.2.1")
+    report.network = net
+    # Without the seed the address set is empty and every IP-keyed pass (ports, ip-info) is skipped.
+    assert _collect_ips(report) == {"192.0.2.1"}
+
+
+def test_resolve_network_seeds_bare_ipv6_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    from stackscan import scan
+    from stackscan.net import GeoProvider
+    from stackscan.scan import _resolve_network
+
+    monkeypatch.setattr(scan, "resolve_host", _empty_dns)
+    net = asyncio.run(_resolve_network("2001:db8::1", _opts(geo=False), GeoProvider(None)))
+    assert net is not None
+    assert "2001:db8::1" in net.ipv6
+
+
+def test_resolve_network_does_not_seed_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
+    from stackscan import scan
+    from stackscan.net import GeoProvider
+    from stackscan.scan import _resolve_network
+
+    monkeypatch.setattr(
+        scan,
+        "resolve_host",
+        lambda host, **_: DnsResult(
+            host=host, ipv4=("93.184.216.34",), ipv6=(), cname=(), reverse_dns={}
+        ),
+    )
+    net = asyncio.run(_resolve_network("example.com", _opts(geo=False), GeoProvider(None)))
+    assert net is not None
+    assert "example.com" not in net.ipv4

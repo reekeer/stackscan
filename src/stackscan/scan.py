@@ -55,7 +55,7 @@ from stackscan.types import (
     Technology,
     TlsInfo,
 )
-from stackscan.utils import host_of, is_https, port_of
+from stackscan.utils import host_of, is_https, is_ip, port_of
 
 if TYPE_CHECKING:
     from stackscan.core import StackscanSession
@@ -236,14 +236,24 @@ async def _resolve_network(host: str, options: ScanOptions, geo: GeoProvider) ->
     if not host or not options.dns:
         return None
     dns = await asyncio.to_thread(resolve_host, host)
+    ipv4, ipv6 = dns.ipv4, dns.ipv6
+    # A bare IP target resolves to nothing — there is no A record for a literal address — so seed it
+    # in ourselves. Without this the port scan, IP enrichment and everything keyed off the address set
+    # get an empty list and quietly skip the whole target when the homepage happens to be down.
+    if is_ip(host):
+        version = 6 if ":" in host else 4
+        if version == 4 and host not in ipv4:
+            ipv4 = (*ipv4, host)
+        elif version == 6 and host not in ipv6:
+            ipv6 = (*ipv6, host)
     geo_map: dict[str, dict[str, str]] = {}
     if options.geo and geo.enabled:
-        geo_map = await asyncio.to_thread(lookup_geo, (*dns.ipv4, *dns.ipv6), geo)
+        geo_map = await asyncio.to_thread(lookup_geo, (*ipv4, *ipv6), geo)
     domains = _collect_dns_domains(host, dns)
     return NetworkInfo(
         host=host,
-        ipv4=dns.ipv4,
-        ipv6=dns.ipv6,
+        ipv4=ipv4,
+        ipv6=ipv6,
         cname=dns.cname,
         mx=dns.mx,
         ns=dns.ns,
@@ -985,7 +995,10 @@ async def scan_target(
                 stage("extracting social links")
                 report.social = parse_social(fetched.body, fetched.url)
 
-        if options.subdomains and host:
+        # A bare IP has no subdomains to enumerate — resolving a 5000-label wordlist against it is
+        # pure waste — so the whole pass is skipped when the target is a literal address.
+        do_subdomains = options.subdomains and bool(host) and not is_ip(host)
+        if do_subdomains:
             stage("enumerating subdomains")
         if options.probe and fetched is not None:
             stage("probing exposure")
@@ -999,7 +1012,7 @@ async def scan_target(
             if sub_log is not None:
                 sub_log.advance(message)
 
-        if options.subdomains and host and log is not None:
+        if do_subdomains and log is not None:
             log.reserve(3)
         sub_coro = (
             enumerate_subdomains(
@@ -1012,7 +1025,7 @@ async def scan_target(
                 passive=options.ct_logs,
                 on_phase=_sub_phase,
             )
-            if options.subdomains and host
+            if do_subdomains
             else _aval([])
         )
         exp_coro = (

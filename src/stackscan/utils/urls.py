@@ -17,6 +17,14 @@ def expand_cidr(raw: str) -> list[str]:
     return [str(host) for host in network]
 
 
+def is_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
 def normalize_url(raw: str) -> str:
     if raw.startswith(("http://", "https://")):
         return raw

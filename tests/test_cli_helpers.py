@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from stackscan.cli import _dedupe, _format_detected, _read_targets
-from stackscan.utils import normalize_url
+from stackscan.utils import is_ip, normalize_url
 
 
 def test_normalize_url_adds_https_to_bare_host() -> None:
@@ -45,3 +45,14 @@ def test_read_targets_prepends_positional_targets(tmp_path: Path) -> None:
 def test_read_targets_missing_file_raises() -> None:
     with pytest.raises(FileNotFoundError):
         _read_targets(Path("does-not-exist-xyz.txt"), [])
+
+
+def test_is_ip_recognizes_v4_and_v6() -> None:
+    assert is_ip("192.0.2.1") is True
+    assert is_ip("2001:db8::1") is True
+
+
+def test_is_ip_rejects_hostnames() -> None:
+    assert is_ip("example.com") is False
+    assert is_ip("192.0.2.1/24") is False
+    assert is_ip("") is False
