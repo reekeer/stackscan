@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [2.7.1] - 2026-08-28
+
+### Added
+
+- **Progress inside reekeer.** A scan says how far along it is with `reekeer.progress` — one bar per target, staged the same way the terminal's is — and reekeer draws it: a line that rewrites itself at the prompt, a real bar in the window. The `rich` display is not built at all when reekeer is hosting, because it is a *live* display and that is cursor movement: pointed anywhere that is not a terminal it rendered nothing whatever, which is what a two-minute scan looked like from inside the shell, and forcing it would have sent one frame of escape sequences per update into a log that cannot replay them. Standalone output is untouched, and a reekeer too old to have `reekeer.progress` simply gets none.
+
+- **A form in the reekeer window.** `embed.form()` declares which of stackscan's flags are worth a control — the targets, `--full`/`--ports`/`--subdomains`/`--default-creds`, and the bounds worth reaching for when a scan is too slow — and reekeer draws exactly those. It replaces reekeer reading `stackscan --help` and making a control out of every flag it found, which produced a column thirty deep in which the target of the scan looked no different from `--no-bell`. Everything left out still parses on the argument line under the form.
+
+- **`--disable` and `--export` are checkboxes in the window.** Both are a comma list argparse reads as one value, so the form declares them as a closed set you tick several of — reekeer draws a box per pass and sends the ticked ones as `--disable dns,tls`. Standalone the flag is unchanged.
+
+### Changed
+
+- **No brute prompt inside reekeer.** The mid-scan `Try to brute? [Y]es / [N]o` reads `/dev/tty`, which the shell's worker has no terminal for — the prompt hung with nowhere for an answer to come from, and its stdin fallback would have swallowed the next protocol message. Hosted, the choice is made before the run: `--full-auto` is a switch on the form, on brute-forces every discovered device, off leaves them found but untried. Standalone the prompt is exactly as it was.
+
+- **The host block no longer repeats the elapsed time.** The summary line already ends `… in 1m 40s` and reekeer's status bar carries a live clock, so an `elapsed` row in the host table was the same number a third time. Dropped from the reekeer document; standalone output is unchanged.
+
+### Fixed
+
+- **The standalone progress bar is one rewriting line again, not a column of `]0;stackscan …`.** `rich.Progress` redirects `sys.stderr` through a proxy that reprints whatever is written to it as a line above the bar, so the per-stage window-title escape — written straight to stderr each stage — was captured and echoed as visible text instead of retitling the window, one dead line per stage. The title now holds while the live display is up and is set only around it, so the bar rewrites itself in place as intended.
+
+- **A bare IP whose homepage is down is scanned instead of skipped whole.** A literal address has no A record, so it resolved to an empty set and every pass keyed off that set — the port scan, IP enrichment, virtual-host discovery — quietly had nothing to work on and the target came back empty. The IP is now seeded as its own address, so `--full` against an IP still scans ports, fingerprints services and detects the OS even when nothing answers on 80/443. Subdomain enumeration, which cannot apply to an address, is skipped rather than resolving a wordlist against it.
+
+- **One stack across many subdomains is one row, not twenty.** The technologies table repeated a
+  finding — `leavepulse-ui`, `frontend` — once per host it was seen on, so a stack shared by a dozen
+  subdomains filled the table with the same name a dozen times. Identical stacks now collapse to a
+  single row whose Host cell lists the domains (primary first), and the confidence column shows a
+  range when it varies between them.
+
+- **The brute prompt shows `> ` and takes the answer.** Reading and writing `/dev/tty` through a single `r+` handle swallowed the prompt — it never reached the screen before the read blocked — so `Y` looked like it did nothing. The prompt and the read now use separate terminal handles (falling back to stderr/stdin only when there is no `/dev/tty`), and the brute pass draws a bar while it runs and prints what it found, so a long check reads as working rather than hung.
+
+## [2.7.0] - 2026-08-13
+
+### Added
+
+- **reekeer plugin.** `[tool.reekeer]` in `pyproject.toml` mounts stackscan at `/tools/recon/stackscan` (alias `ss`); `/plugins install reekeer/stackscan` is all it takes. Hosted there the scan is handed back as data and the shell renders it in its own tables, glyphs and palette, so a stackscan report and a built-in listing look like the same program. Standalone output is untouched, and `--export json-t` still wins over both.
+- **Runner mode.** `stackscan --runner` (or `STACKSCAN_RUNNER=1`) claims jobs from a StackScan panel, scans them with the normal engine and posts the results back, over HTTP alone. Configurable by flag or environment, `--once` for a single cycle, and a `Dockerfile` that ships it as a non-root image.
+
+### Changed
+
+- Under reekeer, stackscan no longer draws its banner, renames the terminal window or rings the bell: the shell owns the screen there, and an escape sequence sent down a worker's pipe is just text somebody has to print.
+- Runner mode is refused inside the reekeer shell — it is a loop that runs until killed, and a shell command that never answers is not a command.
+
 ## [2.6.4] - 2026-07-19
 
 ### Added
