@@ -67,6 +67,20 @@ Issues = "https://github.com/reekeer/stackscan/issues"
 [project.scripts]
 stackscan = "stackscan.cli:main"
 
+# Mounts stackscan inside the reekeer shell as /recon/stackscan.
+#
+# Not `/tools/recon`: a root that holds every plugin distinguishes none of them, so the category is
+# the top-level group.
+#
+# Name, version, description, authors and dependencies are read from [project] above, so nothing is
+# repeated here. No arguments are declared on purpose: stackscan's own argparse keeps ownership of all
+# of them, including `--help` and the `sigdb` subcommand, and reekeer hands it the raw tokens.
+[tool.reekeer]
+group = "/recon"
+entrypoint = "stackscan.cli:main"
+python-root = "src"
+aliases = ["ss"]
+
 [tool.hatch.version]
 path = "src/stackscan/__init__.py"
 

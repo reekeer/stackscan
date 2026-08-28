@@ -39,6 +39,26 @@ pip install "stackscan[geo]"   # offline IP geolocation via geoip2 + a MaxMind .
 `nmap` is used for port scans when present; without it a pure-Python scanner is
 used automatically.
 
+### Inside the reekeer shell
+
+stackscan is also a [reekeer](https://github.com/reekeer/reekeer) plugin, mounted
+at `/tools/recon/stackscan` (alias `ss`):
+
+```bash
+reekeer exec /plugins install reekeer/stackscan
+```
+
+Hosted there it drops the banner and the window title and hands the scan back as
+data for reekeer to render in the shell's own tables, so it reads as a command of
+the shell rather than a script being shelled out to. Every flag behaves the same,
+and standalone (`pip`, `uvx stackscan`) is unchanged.
+
+In reekeer's window the scan also gets a form. stackscan says which of its flags
+are worth a control — the targets, the four switches that decide how deep a scan
+goes, and the bounds worth changing when one is too slow — and reekeer draws
+those. The rest are not hidden: the argument line under the form still takes
+anything argparse takes, `--help` included.
+
 ---
 
 ## ✨ Features
@@ -153,6 +173,46 @@ Below are performance benchmarks conducted on two production targets using diffe
 - **Signature sources**: `stackscan sigdb add|list|update|remove …` (recorded under `$XDG_CONFIG_HOME/stackscan/`).
 - **Downloaded wordlists** (SecLists DNS list, default-credential list): cached under `~/.local/stackscan/db/`.
 - **Refresh the CVE database**: `python scripts/build_cve_db.py`.
+
+---
+
+## 🛰 Runner mode
+
+`stackscan --runner` turns the scanner into a worker for a StackScan panel: it
+claims jobs (`POST /api/jobs/claim`), fingerprints each target with the normal
+engine, and posts the results back (`POST /api/results`). It needs nothing but
+network access to the panel — no database, no Redis, no shared filesystem.
+
+```bash
+STACKSCAN_BACKEND_URL=https://panel.example STACKSCAN_WORKER_TOKEN=… \
+  stackscan --runner
+```
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `STACKSCAN_BACKEND_URL` | `http://localhost:8787` | Panel base URL |
+| `STACKSCAN_WORKER_TOKEN` | — | Shared worker token, sent as `X-Worker-Token` |
+| `STACKSCAN_RUNNER_ID` | `runner-<host>-<pid>` | Stable id for this runner |
+| `STACKSCAN_RUNNER_BATCH` | `5` | Jobs claimed per cycle |
+| `STACKSCAN_RUNNER_IDLE` | `5` | Seconds to wait when the queue is empty |
+| `STACKSCAN_RUNNER` | — | Truthy value selects runner mode without the flag |
+
+Every one has a flag (`--backend`, `--worker-token`, `--runner-id`, `--batch`,
+`--sigdb`, `--user-agent`), and `--once` runs a single claim/scan/report cycle,
+which is what you want in a cron job or a smoke test. The runner profile is
+deliberately lean — DNS, TLS, geo and IP info, no ports, CVEs or brute passes —
+because it is meant for volume rather than depth.
+
+Packaged for it:
+
+```bash
+docker build -t stackscan:latest .
+docker run --rm -e STACKSCAN_BACKEND_URL=http://panel:8787 \
+  -e STACKSCAN_WORKER_TOKEN=… stackscan:latest
+```
+
+Runner mode is refused inside the reekeer shell: it is a loop that runs until it
+is killed, and a shell command that never answers is not a command.
 
 ---
 
@@ -287,6 +347,8 @@ stackscan/
 │   ├── config/        ← bundled + sourced sigdb loading
 │   ├── data/          ← builtin.sigdb, cve.json.gz, subdomains.txt
 │   ├── render.py      ← the colorized panel report
+│   ├── embed.py       ← findings as data, and the form, for reekeer to draw
+│   ├── runner.py      ← panel worker: claim jobs, scan, report back
 │   ├── scan.py        ← per-target orchestration
 │   └── cli.py         ← argument parsing and entry point
 ├── scripts/           ← build_cve_db.py (NVD → offline dataset)
