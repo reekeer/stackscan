@@ -14,7 +14,7 @@ authors = [
   { name = "reekeer team" }
 ]
 maintainers = [
-  { name = "delewer", email = "del@reekeer.hidden" }
+  { name = "delewer" }
 ]
 
 dependencies = [
