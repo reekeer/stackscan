@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.2] - 2026-08-30
+
+### Added
+
+- **Releases are cut by the pipeline, not by hand.** Pushing a `v*` tag builds the sdist and wheel, checks the tag against `__version__` so a mislabelled release fails before anything leaves the runner, uploads to PyPI through Trusted Publishing, and then opens the GitHub Release with both artifacts attached and this file's section for that version as the notes. Nothing publishes off a branch push, and the release only appears once the upload has succeeded, so a tag never leaves a release pointing at a package that is not there.
+
 ## [2.7.1] - 2026-08-28
 
 ### Added
