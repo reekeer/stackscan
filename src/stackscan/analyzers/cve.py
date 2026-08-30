@@ -101,6 +101,16 @@ _GENERATOR_RE = re.compile(
     "<meta[^>]+name=[\\\"']generator[\\\"'][^>]+content=[\\\"']([^\\\"']+)[\\\"']", re.IGNORECASE
 )
 _SSH_RE = re.compile(r"openssh[\s_/:-](\d+\.\d+(?:p\d+)?)", re.IGNORECASE)
+_VERSION_PREFIX_RE = re.compile(r"\s*[vV]?\d+\.\d")
+_IMPRECISE_VERSION_RE = re.compile(
+    r"\b(?:or|and) (?:later|higher|earlier|newer|above|below|greater)\b", re.IGNORECASE
+)
+
+
+def _usable_port_version(version: str) -> bool:
+    if not _VERSION_PREFIX_RE.match(version):
+        return False
+    return not _IMPRECISE_VERSION_RE.search(version)
 _CORE_COMMIT_RE = re.compile(
     r"([A-Za-z][A-Za-z0-9\s-]*?)\s+Core\s+\(([a-f0-9]{4,})\)", re.IGNORECASE
 )
@@ -276,7 +286,7 @@ def software_from_ports(scan: PortScan | None) -> list[Software]:
                 )
             )
             continue
-        if port.product and port.version:
+        if port.product and port.version and _usable_port_version(port.version):
             out.append(
                 Software(
                     name=port.product.lower().split()[0],

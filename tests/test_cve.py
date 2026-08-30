@@ -99,6 +99,14 @@ def test_software_from_ports_ssh_space_version() -> None:
     assert "Ubuntu" in ssh.os
 
 
+def test_software_from_ports_skips_imprecise_version() -> None:
+    scan = PortScan(
+        scanner="nmap",
+        ports=(Port(port=27017, service="mongodb", product="MongoDB", version="6.1 or later"),),
+    )
+    assert software_from_ports(scan) == []
+
+
 def test_match_cves_marks_nmap_ssh_banner_unconfirmed() -> None:
     scan = PortScan(
         scanner="nmap",
