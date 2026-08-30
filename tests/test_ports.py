@@ -155,3 +155,31 @@ def test_run_nmap_omits_extrainfo_from_version(monkeypatch: object) -> None:
     assert scan is not None
     port = scan.ports[0]
     assert port.version == "1.6.45"
+
+
+def test_http_probe_reads_server_header_with_crlf() -> None:
+    import asyncio
+
+    from stackscan.net.ports import _http_probe
+
+    class _Reader:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+
+        async def read(self, _n: int) -> bytes:
+            data, self._data = self._data, b""
+            return data
+
+    class _Writer:
+        def write(self, _data: bytes) -> None:
+            pass
+
+        async def drain(self) -> None:
+            pass
+
+    raw = b"HTTP/1.1 200 OK\r\nServer: nginx/1.25.5\r\nContent-Length: 0\r\n\r\n"
+    product, version, _os = asyncio.run(
+        _http_probe("127.0.0.1", 8081, _Reader(raw), _Writer(), 2.0)
+    )
+    assert product == "nginx"
+    assert version == "1.25.5"

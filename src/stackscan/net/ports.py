@@ -229,9 +229,10 @@ async def _http_probe(
         await asyncio.wait_for(writer.drain(), timeout=min(timeout, 2.5))
     except (TimeoutError, OSError):
         return (None, None, "")
-    raw = await _read(reader, timeout)
-    if not raw:
+    data = await _read_bytes(reader, timeout)
+    if not data:
         return (None, None, "")
+    raw = data.decode("utf-8", "replace")
     product, version = fingerprint_http(raw)
     os = _os_from_banner(raw)
     return (product, version, os)
@@ -246,10 +247,10 @@ async def _rtsp_probe(
         await asyncio.wait_for(writer.drain(), timeout=min(timeout, 2.5))
     except (TimeoutError, OSError):
         return (None, None)
-    raw = await _read(reader, timeout)
-    if not raw:
+    data = await _read_bytes(reader, timeout)
+    if not data:
         return (None, None)
-    server = fingerprint_http(raw)
+    server = fingerprint_http(data.decode("utf-8", "replace"))
     if server != (None, None):
         return server
     return ("RTSP", None)
