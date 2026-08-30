@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from rich.console import Console
 from rich.markup import escape
@@ -363,7 +363,7 @@ def _bar(label: str, total: int | None = None) -> Any:
     if _reekeer_progress is None:
         return None
     try:
-        return _reekeer_progress.bar(label, total=total)
+        return cast("Any", _reekeer_progress).bar(label, total=total)
     except Exception:
         # Reporting progress is not what stackscan is for. It must never be the reason a scan fails.
         return None
