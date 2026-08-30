@@ -6,6 +6,7 @@ from rich.console import Console
 
 from stackscan.analyzers import TechAnalyzer
 from stackscan.cli import _apply_disable
+from stackscan.core.core import _charset
 from stackscan.types import FetchResult
 
 
@@ -36,3 +37,10 @@ def test_curated_detects_header_and_cookie_tech() -> None:
     )
     names = {t.name for t in analyzer.detect(result)}
     assert {"PHP", "Drupal", "Laravel", "Django"} <= names
+
+
+def test_charset_falls_back_on_unknown_encoding() -> None:
+    assert _charset("utf-8") == "utf-8"
+    assert _charset(None) == "utf-8"
+    assert _charset("") == "utf-8"
+    assert _charset("nonsense-charset") == "utf-8"

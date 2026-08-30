@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 from collections.abc import Iterable
 
 from aiohttp import ClientSession, ClientTimeout
@@ -10,6 +11,16 @@ from stackscan.types import FetchResult
 
 def _lower_headers(items: Iterable[tuple[str, str]]) -> dict[str, str]:
     return {key.lower(): value for key, value in items}
+
+
+def _charset(declared: str | None) -> str:
+    if not declared:
+        return "utf-8"
+    try:
+        codecs.lookup(declared)
+    except LookupError:
+        return "utf-8"
+    return declared
 
 
 class StackscanSession:
@@ -54,7 +65,7 @@ class StackscanSession:
             headers = _lower_headers(header_items)
             raw_headers = [f"{key.lower()}: {value}" for key, value in header_items]
             cookies = resp.headers.getall("Set-Cookie", [])
-            charset = resp.charset or "utf-8"
+            charset = _charset(resp.charset)
             body_bytes = await resp.content.read(max_bytes)
             while await resp.content.read(8192):
                 pass
