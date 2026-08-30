@@ -31,7 +31,7 @@ from stackscan.analyzers import TechAnalyzer
 from stackscan.config import build_matchers
 from stackscan.core import StackscanSession
 from stackscan.net import GeoProvider
-from stackscan.scan import ScanOptions, scan_target
+from stackscan.scan import ScanOptions, exc_text, scan_target
 from stackscan.types import ScanReport, Technology
 
 DEFAULT_BACKEND_URL = "http://localhost:8787"
@@ -232,7 +232,7 @@ async def _run(cfg: RunnerConfig) -> None:
                         log=None,
                     )
                 except Exception as exc:  # noqa: BLE001 - one bad target must not stop the runner.
-                    report = ScanReport(url=url, error=str(exc))
+                    report = ScanReport(url=url, error=exc_text(exc))
                 return report_to_result(report, job_id, cfg.runner_id)
 
             usable = [job for job in jobs if job.get("url") and job.get("id")]

@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from stackscan.net.dns import DnsResult
-from stackscan.scan import ScanOptions, _fetch_with_fallback, stage_total
+from stackscan.scan import ScanOptions, _fetch_with_fallback, exc_text, stage_total
 from stackscan.types import FetchResult, ScanReport
 
 
@@ -100,6 +100,26 @@ def test_fetch_with_fallback_retries_insecure_https() -> None:
     assert session.calls[0] == ("https://1.2.3.4", False)
     assert session.calls[1] == ("https://1.2.3.4", True)
     assert report.error is None
+
+
+class _TimeoutSession:
+    async def fetch(self, url: str, **_: object) -> FetchResult:
+        raise TimeoutError
+
+
+def test_exc_text_names_empty_exceptions() -> None:
+    assert exc_text(TimeoutError()) == "timed out"
+    assert exc_text(ConnectionResetError()) == "ConnectionResetError"
+    assert exc_text(ValueError("boom")) == "boom"
+
+
+def test_fetch_with_fallback_reports_timeout_message() -> None:
+    report = ScanReport(url="http://slow.test")
+    result, _ = asyncio.run(
+        _fetch_with_fallback("http://slow.test", _TimeoutSession(), _Options(), report)
+    )
+    assert result is None
+    assert report.error == "timed out"
 
 
 def _empty_dns(host: str, **_: object) -> DnsResult:

@@ -72,6 +72,15 @@ def _http_url(host: str, port: int, tls: bool) -> str:
     return f"{scheme}://{host}:{port}"
 
 
+def exc_text(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if message:
+        return message
+    if isinstance(exc, TimeoutError):
+        return "timed out"
+    return exc.__class__.__name__
+
+
 async def _cdn_ips(ips: set[str], *, timeout: float = 8.0, workers: int = 5) -> set[str]:
     import aiohttp
 
@@ -128,7 +137,7 @@ async def _fetch_with_fallback(
             )
         except Exception as exc:
             if first_error is None:
-                first_error = str(exc)
+                first_error = exc_text(exc)
             continue
         return (fetched, attempt)
     report.error = first_error
@@ -372,7 +381,7 @@ async def _scan_site(
             max_bytes=options.max_bytes,
         )
     except Exception as exc:
-        return SiteFinding(url=url, error=str(exc))
+        return SiteFinding(url=url, error=exc_text(exc))
     block_msg = detect_isp_block(url, fetched)
     if block_msg:
         return SiteFinding(url=url, final_url=fetched.url, status=fetched.status, error=block_msg)
