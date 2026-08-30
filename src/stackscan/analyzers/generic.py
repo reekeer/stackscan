@@ -155,6 +155,11 @@ def _software_name(name: str) -> str:
     return _normalize_name(name).lower().replace(" ", "")
 
 
+def _name_detached_from_version(name: str) -> bool:
+    """True when the version sits behind a stopword/other product, not this name."""
+    return _software_name(_clean_product_name(name)) != _software_name(name)
+
+
 def _category(name: str) -> str:
     if _software_name(name) in {n.replace(" ", "") for n in SERVER_NAMES}:
         return "infrastructure"
@@ -201,10 +206,11 @@ def extract_generic_tech(body: str) -> list[Technology]:
     powered_starts: set[int] = set()
     for match in _POWERED_BY_VERSION_RE.finditer(body):
         name = _normalize_name(match.group(1))
-        version = match.group(2)
+        version = match.group(2) if not _name_detached_from_version(name) else None
         powered_starts.add(match.start())
         if name and not _is_noise(name):
-            remember(name, f"body:powered-by {name} {version}", version)
+            evidence = f"body:powered-by {name} {version}" if version else f"body:powered-by {name}"
+            remember(name, evidence, version)
 
     for match in _POWERED_BY_PLAIN_RE.finditer(body):
         if match.start() in powered_starts:
@@ -281,10 +287,11 @@ def extract_generic_software(body: str, location: str = "") -> list[Software]:
     powered_starts: set[int] = set()
     for match in _POWERED_BY_VERSION_RE.finditer(body):
         name = _normalize_name(match.group(1))
-        version = match.group(2)
+        version = match.group(2) if not _name_detached_from_version(name) else None
         powered_starts.add(match.start())
         if name:
-            add(name, version, f"body:powered-by {name} {version}")
+            evidence = f"body:powered-by {name} {version}" if version else f"body:powered-by {name}"
+            add(name, version, evidence)
 
     for match in _POWERED_BY_PLAIN_RE.finditer(body):
         if match.start() in powered_starts:

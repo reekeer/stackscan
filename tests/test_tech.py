@@ -244,3 +244,10 @@ def test_generic_powered_by_keeps_single_versioned_hit() -> None:
 
     techs = extract_generic_tech("Powered by CurseForge v2.11.4")
     assert [(t.name, t.version) for t in techs] == [("CurseForge", "2.11.4")]
+
+
+def test_generic_powered_by_drops_version_across_stopword() -> None:
+    from stackscan.analyzers.generic import extract_generic_software
+
+    hits = {s.name: s.version for s in extract_generic_software("powered by coffee and jQuery 1.12.4")}
+    assert hits.get("coffee") is None
