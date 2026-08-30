@@ -112,9 +112,6 @@ def _run_nmap(host: str, ports: tuple[int, ...]) -> PortScan | None:
             os_tag = ""
             if version and (product or "").lower() in ("mysql", "mariadb"):
                 product, version, os_tag = normalize_mysql_version(product, version)
-            extra = info.get("extrainfo") or None
-            if extra and version:
-                version = f"{version} ({extra})"
             found.append(
                 Port(
                     port=int(number),

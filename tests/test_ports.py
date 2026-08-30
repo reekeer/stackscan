@@ -119,3 +119,39 @@ def test_normalize_mysql_version_names_mariadb_without_prefix() -> None:
     product, version, _ = normalize_mysql_version("MySQL", "10.11.6-MariaDB-1:10.11.6")
     assert product == "MariaDB"
     assert version == "10.11.6"
+
+
+def test_run_nmap_omits_extrainfo_from_version(monkeypatch: object) -> None:
+    import sys
+    import types
+
+    from stackscan.net import ports as ports_mod
+
+    class _FakeScanner:
+        def scan(self, host: str, port_arg: str, arguments: str) -> None:
+            self._host = host
+
+        def all_hosts(self) -> list[str]:
+            return [self._host]
+
+        def __getitem__(self, host: str) -> dict[str, object]:
+            return {
+                "tcp": {
+                    11211: {
+                        "state": "open",
+                        "name": "memcached",
+                        "product": "Memcached",
+                        "version": "1.6.45",
+                        "extrainfo": "uptime 490 seconds",
+                    }
+                }
+            }
+
+    fake_nmap = types.ModuleType("nmap")
+    fake_nmap.PortScanner = _FakeScanner  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "nmap", fake_nmap)  # type: ignore[attr-defined]
+
+    scan = ports_mod._run_nmap("127.0.0.1", (11211,))
+    assert scan is not None
+    port = scan.ports[0]
+    assert port.version == "1.6.45"
