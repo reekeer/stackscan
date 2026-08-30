@@ -43,6 +43,14 @@ def host_of(url: str) -> str:
     return (parsed.hostname or "").lower()
 
 
+def netloc_of(url: str) -> str:
+    parsed = urlparse(url if "://" in url else "https://" + url)
+    host = (parsed.hostname or "").lower()
+    if parsed.port is not None:
+        return f"{host}:{parsed.port}"
+    return host
+
+
 def port_of(url: str) -> int:
     parsed = urlparse(url)
     if parsed.port is not None:

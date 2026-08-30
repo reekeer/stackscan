@@ -55,7 +55,7 @@ from stackscan.types import (
     Technology,
     TlsInfo,
 )
-from stackscan.utils import host_of, is_https, is_ip, port_of
+from stackscan.utils import host_of, is_https, is_ip, netloc_of, port_of
 
 if TYPE_CHECKING:
     from stackscan.core import StackscanSession
@@ -998,7 +998,7 @@ async def scan_target(
             report.protocols = _http_protocols(fetched, report.tls)
             stage("scanning page for secrets")
             report.secrets = scan_secrets(
-                fetched.body, location=host_of(fetched.url) if fetched else host or ""
+                fetched.body, location=netloc_of(fetched.url) if fetched else host or ""
             )
             if options.parse_social:
                 stage("extracting social links")
