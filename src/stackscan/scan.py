@@ -448,7 +448,7 @@ def _collect_site_candidates(report: ScanReport, limit: int) -> list[str]:
         for port in port_scan.ports:
             if port.port not in _HTTP_PORTS:
                 continue
-            host = port.host or report.network.host if report.network else None
+            host = port.host or (report.network.host if report.network else None)
             if not host:
                 continue
             tls = port.port in (443, 8443, 2083) or "https" in (port.service or "").lower()
