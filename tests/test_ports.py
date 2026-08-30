@@ -4,6 +4,7 @@ from stackscan.net.fingerprint import (
     fingerprint_banner,
     fingerprint_http,
     fingerprint_mysql,
+    normalize_mysql_version,
     sanitize_banner,
 )
 from stackscan.net.ports import COMMON_PORTS, default_ports
@@ -97,3 +98,24 @@ def test_fingerprint_mysql_detects_fedora() -> None:
     product, version, os, refused = fingerprint_mysql(data)
     assert product == "MariaDB"
     assert os == "Fedora 38"
+
+
+def test_normalize_mysql_version_unwraps_mariadb_handshake() -> None:
+    assert normalize_mysql_version("MySQL", "5.5.5-10.6.12-MariaDB") == (
+        "MariaDB",
+        "10.6.12",
+        "",
+    )
+
+
+def test_normalize_mysql_version_keeps_mysql_and_distro() -> None:
+    product, version, distro = normalize_mysql_version("MySQL", "5.7.44-0ubuntu0.18.04.1")
+    assert product == "MySQL"
+    assert version == "5.7.44"
+    assert "Ubuntu" in distro
+
+
+def test_normalize_mysql_version_names_mariadb_without_prefix() -> None:
+    product, version, _ = normalize_mysql_version("MySQL", "10.11.6-MariaDB-1:10.11.6")
+    assert product == "MariaDB"
+    assert version == "10.11.6"

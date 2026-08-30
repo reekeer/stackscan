@@ -92,6 +92,16 @@ def fingerprint_http(raw_response: str) -> tuple[str | None, str | None]:
     return (server, None)
 
 
+def normalize_mysql_version(product: str | None, version: str) -> tuple[str, str, str]:
+    distro = extract_distro(version) or ""
+    if version.startswith("5.5.5-"):
+        version = version[6:]
+        product = "MariaDB"
+    elif "mariadb" in version.lower():
+        product = "MariaDB"
+    return (product or "MySQL", version.split("-", 1)[0] or version, distro)
+
+
 def fingerprint_mysql(data: bytes) -> tuple[str | None, str | None, str | None, bool]:
     if not data or len(data) < 5:
         return (None, None, None, False)
@@ -108,13 +118,5 @@ def fingerprint_mysql(data: bytes) -> tuple[str | None, str | None, str | None, 
     version = version.replace("\x00", "").strip()
     if not version:
         return (None, None, None, False)
-    if version.startswith("5.5.5-"):
-        version = version[6:]
-        product = "MariaDB"
-    elif "mariadb" in version.lower():
-        product = "MariaDB"
-    else:
-        product = "MySQL"
-    clean_version = version.split("-", 1)[0]
-    distro = extract_distro(version)
-    return (product, clean_version, distro, False)
+    product, clean_version, distro = normalize_mysql_version(None, version)
+    return (product, clean_version, distro or None, False)
