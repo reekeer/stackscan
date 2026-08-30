@@ -93,7 +93,7 @@ _POWERED_BY_PLAIN_RE = re.compile(
 _SERVER_VERSION_RE = re.compile(
     r"\b("
     + "|".join(re.escape(name) for name in sorted(SERVER_NAMES, key=len, reverse=True))
-    + r")[/ ]v?(\d+\.\d+(?:\.\d+){0,2})",
+    + r")([/ ])v?(\d+\.\d+(?:\.\d+){0,2})",
     re.IGNORECASE,
 )
 
@@ -200,8 +200,9 @@ def extract_generic_tech(body: str) -> list[Technology]:
 
     for match in _SERVER_VERSION_RE.finditer(body):
         name = _normalize_name(match.group(1))
-        version = match.group(2)
-        remember(name, f"body:{name}/{version}", version)
+        version = match.group(3)
+        source = f"body:{name}/{version}" if match.group(2) == "/" else f"body-text:{name} {version}"
+        remember(name, source, version)
 
     powered_starts: set[int] = set()
     for match in _POWERED_BY_VERSION_RE.finditer(body):
@@ -281,8 +282,9 @@ def extract_generic_software(body: str, location: str = "") -> list[Software]:
 
     for match in _SERVER_VERSION_RE.finditer(body):
         name = _normalize_name(match.group(1))
-        version = match.group(2)
-        add(name, version, f"body:{name}/{version}")
+        version = match.group(3)
+        source = f"body:{name}/{version}" if match.group(2) == "/" else f"body-text:{name} {version}"
+        add(name, version, source)
 
     powered_starts: set[int] = set()
     for match in _POWERED_BY_VERSION_RE.finditer(body):

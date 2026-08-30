@@ -304,6 +304,11 @@ _SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
 
 
 def _confidence(version: str, rng: dict[str, str], source: str, backported: bool = False) -> int:
+    if source.startswith("body-text:"):
+        # a bare "name version" scraped from page prose (e.g. a blog post),
+        # not a live banner — kept below the default threshold so it is hidden
+        # unless the user asks for low-confidence matches.
+        return 30
     if backported:
         if "start_incl" in rng or "start_excl" in rng:
             return 35
@@ -349,8 +354,14 @@ def _match_entries(
         return
     if len([c for c in re.split("[.\\-_]", version) if c[:1].isdigit()]) < 2:
         return
+    from_prose = item.source.startswith("body-text:")
     backported = bool(item.os)
-    caveat = "distro backport likely — patchlevel not in banner" if backported else ""
+    if from_prose:
+        caveat = "version mentioned in page text — may not be the running software"
+    elif backported:
+        caveat = "distro backport likely — patchlevel not in banner"
+    else:
+        caveat = ""
     for entry in entries:
         ranges = cast("list[dict[str, str]]", entry.get("ranges") or [])
         hit_rng = next((r for r in ranges if _in_range(version, r)), None)
@@ -369,7 +380,7 @@ def _match_entries(
                 confidence=confidence,
                 summary=str(entry.get("summary", "")),
                 url=entry.get("url"),
-                unconfirmed=backported,
+                unconfirmed=backported or from_prose,
                 caveat=caveat,
             )
             agg[cve_id] = record

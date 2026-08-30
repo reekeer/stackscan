@@ -212,6 +212,24 @@ def test_extract_generic_software_from_404_body() -> None:
     assert nginx.source.startswith("body:")
 
 
+def test_prose_version_mention_hidden_at_default_threshold() -> None:
+    body = "<p>Last year we ran Apache 2.4.49 before moving to nginx 1.14.2.</p>"
+    software = extract_software({}, body)
+    assert {s.name for s in software} == {"apache", "nginx"}
+    assert all(s.source.startswith("body-text:") for s in software)
+    assert match_cves(software, min_confidence=40) == []
+    low = match_cves(software)
+    assert low
+    assert all(c.unconfirmed and c.confidence < 40 for c in low)
+
+
+def test_server_footer_version_stays_reliable() -> None:
+    body = "<html><body><hr><center>nginx/1.18.0</center></body></html>"
+    software = extract_software({"server": "cloudflare"}, body)
+    cves = match_cves(software, min_confidence=40)
+    assert any(c.id == "CVE-2021-23017" for c in cves)
+
+
 def test_commit_hash_does_not_match_cve_ranges() -> None:
     software = extract_software({}, "CurseForge Core (a26fded)")
     assert not match_cves(software)
