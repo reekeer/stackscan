@@ -8,6 +8,7 @@ from functools import lru_cache
 from urllib.parse import urljoin
 
 from rich.console import Console, Group, RenderableType
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -144,7 +145,7 @@ def _network_section(report: ScanReport) -> RenderableType | None:
         ttl = ""
         if rrtype in dns_ttl:
             ttl = str(dns_ttl[rrtype])
-        table.add_row(rrtype, target, value, ttl)
+        table.add_row(rrtype, escape(target), escape(value), ttl)
     return table
 
 
@@ -159,7 +160,7 @@ def _whois_section(report: ScanReport) -> RenderableType | None:
     if registrar and whois.registrar_url:
         registrar += f"  ·  {whois.registrar_url}"
     if registrar:
-        grid.add_row("Registrar", registrar)
+        grid.add_row("Registrar", escape(registrar))
     if whois.registrant_public and whois.registrant:
         grid.add_row("Registrant", Text(whois.registrant, style=theme.WARN))
     elif whois.privacy:
@@ -172,9 +173,9 @@ def _whois_section(report: ScanReport) -> RenderableType | None:
     if whois.expires:
         dates.append(f"expires {whois.expires[:10]}")
     if dates:
-        grid.add_row("Dates", "  ·  ".join(dates))
+        grid.add_row("Dates", escape("  ·  ".join(dates)))
     if whois.nameservers:
-        grid.add_row("Nameservers", ", ".join(whois.nameservers))
+        grid.add_row("Nameservers", escape(", ".join(whois.nameservers)))
     if whois.dnssec:
         style = theme.SUCCESS if whois.dnssec == "signed" else theme.MUTED
         grid.add_row("DNSSEC", Text(whois.dnssec, style=style))
@@ -270,7 +271,7 @@ def _tls_section(report: ScanReport) -> RenderableType | None:
         issued_by = _issuer_org(tls.issuer)
         if ca_kind:
             issued_by += f"  ·  {ca_kind}"
-        grid.add_row("Issued by", issued_by)
+        grid.add_row("Issued by", escape(issued_by))
     expiry = _cert_expiry(tls.not_after)
     if expiry is not None:
         grid.add_row("Expires", expiry)
@@ -278,14 +279,14 @@ def _tls_section(report: ScanReport) -> RenderableType | None:
         grid.add_row("Issued", Text(tls.not_before, style=theme.MUTED))
     proto = " ".join(filter(None, (tls.protocol, tls.cipher)))
     if proto:
-        grid.add_row("Cipher", proto)
+        grid.add_row("Cipher", escape(proto))
     if tls.alpn:
-        grid.add_row("ALPN", tls.alpn)
+        grid.add_row("ALPN", escape(tls.alpn))
     if tls.subject_alt_names:
         sans = ", ".join(tls.subject_alt_names[:8])
         if len(tls.subject_alt_names) > 8:
             sans += f" (+{len(tls.subject_alt_names) - 8} more)"
-        grid.add_row("SANs", sans)
+        grid.add_row("SANs", escape(sans))
     if report.protocols:
         grid.add_row("HTTP", "  ·  ".join(report.protocols))
     if not grid.row_count:
@@ -348,10 +349,10 @@ def _tech_section(report: ScanReport) -> RenderableType | None:
     for key in order:
         group = groups[key]
         table.add_row(
-            group.name,
-            group.version or "-",
-            group.category,
-            group.hosts_cell(primary),
+            escape(group.name),
+            escape(group.version or "-"),
+            escape(group.category),
+            escape(group.hosts_cell(primary)),
             group.conf_cell(),
         )
     return table
@@ -425,12 +426,12 @@ def _services_section(report: ScanReport) -> RenderableType | None:
         product = " ".join(filter(None, (port.product, port.version)))
         table.add_row(
             f"{port.port}/{port.protocol}",
-            port.host or "-",
-            _service_cell(product, port.service),
+            escape(port.host or "-"),
+            escape(_service_cell(product, port.service)),
             _sev_text(severity),
         )
     for svc in tech_services:
-        table.add_row("-", "-", _service_cell(svc.name, svc.kind), _sev_text(svc.severity))
+        table.add_row("-", "-", escape(_service_cell(svc.name, svc.kind)), _sev_text(svc.severity))
 
     if report.ports is not None:
         return Group(table, Text(f"via {report.ports.scanner}", style="dim"))
@@ -465,10 +466,10 @@ def _cve_section(report: ScanReport) -> RenderableType | None:
             summary = f"{cve.caveat} — {summary}"
         table.add_row(
             _severity_text(cve),
-            cve.id,
-            affects,
-            where,
-            summary,
+            escape(cve.id),
+            escape(affects),
+            escape(where),
+            escape(summary),
         )
     return table
 
@@ -490,10 +491,16 @@ def _ipinfo_section(report: ScanReport) -> RenderableType | None:
     table.add_column("Source", overflow="fold")
     for info in ordered:
         location = ", ".join(v for v in (info.city, info.country) if v) or "-"
-        org = info.org or info.isp or "-"
+        org = escape(info.org or info.isp or "-")
         if info.is_cdn:
             org = f"{org} [dim](CDN/proxy)[/dim]"
-        table.add_row(info.ip, location, org, info.asn or "-", info.source or "-")
+        table.add_row(
+            escape(info.ip),
+            escape(location),
+            org,
+            escape(info.asn or "-"),
+            escape(info.source or "-"),
+        )
     return table
 
 
@@ -513,7 +520,9 @@ def _creds_section(report: ScanReport) -> RenderableType | None:
             label = Text(" OPEN / NO AUTH ", style="bold white on red")
         else:
             label = Text("auth required", style="dim")
-        table.add_row(finding.target, label, f"{finding.service} — {finding.detail}")
+        table.add_row(
+            escape(finding.target), label, escape(f"{finding.service} — {finding.detail}")
+        )
     return table
 
 
@@ -528,10 +537,10 @@ def _secrets_section(report: ScanReport) -> RenderableType | None:
     for secret in sorted(report.secrets, key=lambda s: s.severity):
         color = theme.SEVERITY.get(secret.severity.upper(), theme.MUTED)
         table.add_row(
-            secret.name,
-            secret.value,
+            escape(secret.name),
+            escape(secret.value),
             Text(f" {secret.severity.upper()} ", style=f"bold {color}"),
-            secret.location or "-",
+            escape(secret.location or "-"),
         )
     return table
 
@@ -549,11 +558,11 @@ def _takeovers_section(report: ScanReport) -> RenderableType | None:
         color = theme.SEVERITY.get(takeover.severity.upper(), theme.MUTED)
         verified = "verified" if takeover.verified else "potential"
         table.add_row(
-            takeover.subdomain,
-            takeover.service,
-            takeover.cname,
+            escape(takeover.subdomain),
+            escape(takeover.service),
+            escape(takeover.cname),
             Text(f" {takeover.severity.upper()} ", style=f"bold {color}"),
-            f"{takeover.evidence} ({verified})",
+            escape(f"{takeover.evidence} ({verified})"),
         )
     return table
 
@@ -575,9 +584,9 @@ def _subdomains_section(report: ScanReport) -> RenderableType | None:
         real = [ip for ip in sub.addresses if ip in report.real_ips]
         real_cell = ", ".join(real) if real else "-"
         if show_real:
-            table.add_row(sub.name, addrs, sub.source, real_cell)
+            table.add_row(escape(sub.name), escape(addrs), escape(sub.source), escape(real_cell))
         else:
-            table.add_row(sub.name, addrs, sub.source)
+            table.add_row(escape(sub.name), escape(addrs), escape(sub.source))
     return table if table.row_count else None
 
 
@@ -655,9 +664,9 @@ def _report_panel(report: ScanReport) -> Panel:
     if report.network is not None:
         ips.extend(report.network.ipv4)
         ips.extend(report.network.ipv6)
-    left = f"[bold]{report.final_url or report.url}[/bold]"
+    left = f"[bold]{escape(report.final_url or report.url)}[/bold]"
     if ips:
-        left += f"\n[dim]{', '.join(ips)}[/dim]"
+        left += f"\n[dim]{escape(', '.join(ips))}[/dim]"
     header.add_row(left, right)
     blocks: list[RenderableType] = [header]
     if report.error:

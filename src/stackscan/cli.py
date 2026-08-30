@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import Progress
 from rich.table import Table
 
@@ -710,13 +711,13 @@ def _render_table(reports: list[ScanReport], show_empty: bool) -> None:
             ips.extend(report.network.ipv4)
             ips.extend(report.network.ipv6)
         table.add_row(
-            report.final_url or report.url,
-            ", ".join(ips) if ips else "-",
+            escape(report.final_url or report.url),
+            escape(", ".join(ips)) if ips else "-",
             str(report.status) if report.status is not None else "-",
-            _infra_summary(report),
-            _format_detected(report.by_category()),
+            escape(_infra_summary(report)),
+            escape(_format_detected(report.by_category())),
             _exposure_summary(report),
-            report.error or "",
+            escape(report.error or ""),
         )
     console.print(table)
 
@@ -817,11 +818,11 @@ def _scan_summary(reports: list[ScanReport], elapsed: float) -> str:
 
 
 def _warn(console: Console, message: str) -> None:
-    console.print(f"[{theme.WARN}]{_glyphs().warn}[/] {message}", highlight=False)
+    console.print(f"[{theme.WARN}]{_glyphs().warn}[/] {escape(message)}", highlight=False)
 
 
 def _error(console: Console, message: str) -> None:
-    console.print(f"[{theme.DANGER}]{_glyphs().err}[/] {message}", highlight=False)
+    console.print(f"[{theme.DANGER}]{_glyphs().err}[/] {escape(message)}", highlight=False)
 
 
 def _set_title(title: str) -> None:

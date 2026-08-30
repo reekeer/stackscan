@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from rich.console import Console
 
-from stackscan.render import _tech_section
-from stackscan.types import ScanReport, Technology
+from stackscan.render import _network_section, _tech_section
+from stackscan.types import NetworkInfo, ScanReport, Technology
 
 
 def _render(section: object) -> str:
@@ -44,3 +44,26 @@ def test_tech_section_keeps_distinct_stacks_separate() -> None:
     assert out.count("nginx") == 1
     assert out.count("redis") == 1
     assert "90%" in out and "80%" in out
+
+
+def test_tech_section_survives_markup_in_remote_names() -> None:
+    report = ScanReport(url="https://evil.test")
+    report.technologies = [
+        Technology(name="nginx [/]", categories=("web-server",), location="evil.test"),
+        Technology(name="[bold]boom", categories=("web-server",), location="evil.test"),
+    ]
+    out = _render(_tech_section(report))
+    assert "nginx [/]" in out
+    assert "[bold]boom" in out
+
+
+def test_network_section_survives_markup_in_txt_records() -> None:
+    report = ScanReport(url="https://evil.test")
+    report.network = NetworkInfo(
+        host="evil.test",
+        ipv4=("1.2.3.4",),
+        ipv6=(),
+        txt=("v=spf1 [/] all",),
+    )
+    out = _render(_network_section(report))
+    assert "v=spf1 [/] all" in out
