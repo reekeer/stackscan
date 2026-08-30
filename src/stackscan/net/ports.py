@@ -110,9 +110,6 @@ def _run_nmap(host: str, ports: tuple[int, ...]) -> PortScan | None:
             product = info.get("product") or None
             version = info.get("version") or None
             os_tag = ""
-            # MariaDB answers the MySQL handshake as "5.5.5-<real version>-MariaDB", which nmap
-            # reports verbatim under product MySQL. Left alone it is read as MySQL 5.5.5 and
-            # correlates against every CVE in the 5.x line.
             if version and (product or "").lower() in ("mysql", "mariadb"):
                 product, version, os_tag = normalize_mysql_version(product, version)
             extra = info.get("extrainfo") or None
