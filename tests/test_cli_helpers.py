@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from stackscan.cli import _dedupe, _format_detected, _read_targets
-from stackscan.utils import is_ip, normalize_url
+from stackscan.utils import expand_cidr, is_ip, normalize_url
 
 
 def test_normalize_url_adds_https_to_bare_host() -> None:
@@ -56,3 +56,19 @@ def test_is_ip_rejects_hostnames() -> None:
     assert is_ip("example.com") is False
     assert is_ip("192.0.2.1/24") is False
     assert is_ip("") is False
+
+
+def test_expand_cidr_lists_small_networks() -> None:
+    assert expand_cidr("192.0.2.0/30") == [
+        "192.0.2.0",
+        "192.0.2.1",
+        "192.0.2.2",
+        "192.0.2.3",
+    ]
+
+
+def test_expand_cidr_refuses_oversized_networks() -> None:
+    with pytest.raises(ValueError, match="limit"):
+        expand_cidr("10.0.0.0/8")
+    with pytest.raises(ValueError, match="limit"):
+        expand_cidr("::/0")

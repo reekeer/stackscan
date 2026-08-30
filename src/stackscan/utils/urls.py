@@ -3,6 +3,8 @@ from __future__ import annotations
 import ipaddress
 from urllib.parse import urlparse
 
+MAX_CIDR_HOSTS = 65536
+
 
 def is_cidr(raw: str) -> bool:
     try:
@@ -14,6 +16,11 @@ def is_cidr(raw: str) -> bool:
 
 def expand_cidr(raw: str) -> list[str]:
     network = ipaddress.ip_network(raw, strict=False)
+    if network.num_addresses > MAX_CIDR_HOSTS:
+        raise ValueError(
+            f"{raw} expands to {network.num_addresses} addresses"
+            f" (limit {MAX_CIDR_HOSTS}); use a smaller prefix"
+        )
     return [str(host) for host in network]
 
 
