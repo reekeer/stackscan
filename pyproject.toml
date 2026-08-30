@@ -56,7 +56,6 @@ dev = [
   "pytest>=8.0",
   "twine>=5.0",
   "build>=1.0",
-  "cibuildwheel>=2.16",
   "geoip2>=4.8"
 ]
 
@@ -171,18 +170,3 @@ reportMissingTypeStubs = false
 reportOptionalMemberAccess = true
 reportOptionalSubscript = true
 reportGeneralTypeIssues = true
-
-[tool.cibuildwheel]
-build = "cp311-* cp312-* cp313-*"
-skip = "*-musllinux* *-win32"
-test-command = "pytest {project}/tests"
-test-extras = ["dev"]
-
-[tool.cibuildwheel.linux]
-archs = ["x86_64", "aarch64"]
-
-[tool.cibuildwheel.macos]
-archs = ["x86_64", "arm64"]
-
-[tool.cibuildwheel.windows]
-archs = ["AMD64"]
