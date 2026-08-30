@@ -83,8 +83,18 @@ def _looks_like_git(url: str) -> bool:
     return url.endswith(".git") or url.startswith(("git@", "git+", "ssh://"))
 
 
+_GIT_SCHEMES = ("https://", "http://", "ssh://", "git://", "file://")
+
+
 def _normalize_git_url(url: str) -> str:
-    return url[4:] if url.startswith("git+") else url
+    normalized = url[4:] if url.startswith("git+") else url
+    if normalized.startswith("git@") or normalized.startswith(_GIT_SCHEMES):
+        return normalized
+    if "://" not in normalized and "::" not in normalized:
+        expanded = Path(normalized).expanduser()
+        if expanded.exists():
+            return str(expanded)
+    raise SourceError(f"unsupported git url: {url}")
 
 
 def _detect_kind(url: str) -> str:
@@ -385,7 +395,7 @@ def _materialize_git(url: str, dest: Path) -> _Materialized:
     clone_url = _normalize_git_url(url)
     try:
         subprocess.run(
-            ["git", "clone", "--depth", "1", clone_url, str(checkout)],
+            ["git", "clone", "--depth", "1", "--", clone_url, str(checkout)],
             check=True,
             capture_output=True,
             text=True,

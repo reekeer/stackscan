@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from stackscan.config.sources import SourceStore
+from stackscan.config.sources import SourceError, SourceStore, _normalize_git_url
 
 
 @pytest.fixture(autouse=True)
@@ -64,3 +64,22 @@ def test_remove_source(tmp_path: Path) -> None:
     assert store.remove(source.id) is True
     assert store.list() == []
     assert store.remove("nonexistent") is False
+
+
+def test_normalize_git_url_keeps_supported_transports() -> None:
+    assert _normalize_git_url("https://host/repo.git") == "https://host/repo.git"
+    assert _normalize_git_url("git+ssh://host/repo.git") == "ssh://host/repo.git"
+    assert _normalize_git_url("git@host:owner/repo.git") == "git@host:owner/repo.git"
+
+
+def test_normalize_git_url_rejects_transport_helpers() -> None:
+    with pytest.raises(SourceError):
+        _normalize_git_url("ext::sh -c touch% /tmp/pwned.git")
+    with pytest.raises(SourceError):
+        _normalize_git_url("--upload-pack=touch /tmp/pwned.git")
+
+
+def test_normalize_git_url_allows_existing_local_repo(tmp_path: Path) -> None:
+    local = tmp_path / "repo.git"
+    local.mkdir()
+    assert _normalize_git_url(str(local)) == str(local)
