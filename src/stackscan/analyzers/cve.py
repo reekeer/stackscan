@@ -337,6 +337,8 @@ def _match_entries(
         return
     if is_commit_hash(version):
         return
+    if len([c for c in re.split("[.\\-_]", version) if c[:1].isdigit()]) < 2:
+        return
     backported = bool(item.os)
     caveat = "distro backport likely — patchlevel not in banner" if backported else ""
     for entry in entries:

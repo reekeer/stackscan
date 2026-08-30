@@ -252,3 +252,36 @@ def test_software_from_ports_flags_distro_backports_for_any_service() -> None:
             assert all(
                 c.confidence <= 60 for c in cves
             ), f"CVE confidence for {product} {version} should be capped at 60"
+
+
+def test_mariadb_handshake_does_not_flood_mysql_cves() -> None:
+    from stackscan.net.fingerprint import normalize_mysql_version
+
+    product, version, distro = normalize_mysql_version("MySQL", "5.5.5-10.6.12-MariaDB")
+    scan = PortScan(
+        scanner="nmap",
+        ports=(
+            Port(
+                port=3306,
+                service="mysql",
+                product=product,
+                version=version,
+                host="1.2.3.4",
+                os=distro,
+            ),
+        ),
+    )
+    software = software_from_ports(scan)
+    assert [(s.name, s.version) for s in software] == [("mariadb", "10.6.12")]
+    matches = match_cves(software)
+    assert matches
+    assert all(m.product == "mariadb" for m in matches)
+    assert len(matches) < 50
+
+
+def test_match_cves_ignores_major_only_versions() -> None:
+    scan = PortScan(
+        scanner="nmap",
+        ports=(Port(port=3306, service="mysql", product="MySQL", version="5", host="1.2.3.4"),),
+    )
+    assert match_cves(software_from_ports(scan)) == []
