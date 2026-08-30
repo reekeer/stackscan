@@ -220,6 +220,7 @@ async def _run(cfg: RunnerConfig) -> None:
 
             async def scan_one(job: dict[str, str]) -> dict[str, Any]:
                 url = job["url"]
+                job_id = job["id"]
                 try:
                     report = await scan_target(
                         url,
@@ -232,9 +233,19 @@ async def _run(cfg: RunnerConfig) -> None:
                     )
                 except Exception as exc:  # noqa: BLE001 - one bad target must not stop the runner.
                     report = ScanReport(url=url, error=str(exc))
-                return report_to_result(report, job["id"], cfg.runner_id)
+                return report_to_result(report, job_id, cfg.runner_id)
 
-            results = await asyncio.gather(*(scan_one(job) for job in jobs))
+            usable = [job for job in jobs if job.get("url") and job.get("id")]
+            skipped = len(jobs) - len(usable)
+            if skipped:
+                print(f"[!] skipped {skipped} malformed job(s)", flush=True)
+            if not usable:
+                if cfg.once:
+                    return
+                await asyncio.sleep(cfg.idle_seconds)
+                continue
+
+            results = await asyncio.gather(*(scan_one(job) for job in usable))
             try:
                 accepted = await client.report(list(results))
             except Exception as exc:  # noqa: BLE001
