@@ -27,6 +27,15 @@ def to_json(payload: Payload) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def _script_json(value: Any) -> str:
+    return (
+        json.dumps(value, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+
+
 def build_graph(reports: list[dict[str, Any]]) -> dict[str, Any]:
     nodes: dict[str, dict[str, Any]] = {}
     edges: set[tuple[str, str, str]] = set()
@@ -407,7 +416,7 @@ def _html_graph(reports: list[dict[str, Any]]) -> str:
     if len(present_types) < 2:
         return ""
 
-    graph_json = json.dumps(
+    graph_json = _script_json(
         {
             "nodes": [
                 {
@@ -420,8 +429,7 @@ def _html_graph(reports: list[dict[str, Any]]) -> str:
                 for n in graph["nodes"]
             ],
             "edges": graph["edges"],
-        },
-        ensure_ascii=False,
+        }
     )
 
     legend_items = "".join(
@@ -438,7 +446,7 @@ def _html_graph(reports: list[dict[str, Any]]) -> str:
 </div>
 <script>
 (function(){{
-  const colors = {json.dumps(type_color)};
+  const colors = {_script_json(type_color)};
   const data = {graph_json};
   const svg = document.getElementById('netgraph');
   const viewport = svg.querySelector('.graph-viewport');
@@ -493,8 +501,14 @@ def _html_graph(reports: list[dict[str, Any]]) -> str:
   }}
 
   function showTip(ev, n) {{
-    const meta = Object.entries(n.meta || {{}}).map(([k,v]) => `${{k}}: ${{v}}`).join('<br>');
-    tooltip.innerHTML = `<strong>${{n.label}}</strong> (${{n.type}})${{meta ? '<br>' + meta : ''}}`;
+    const strong = document.createElement('strong');
+    strong.textContent = n.label;
+    const parts = [strong, document.createTextNode(` (${{n.type}})`)];
+    Object.entries(n.meta || {{}}).forEach(([k, v]) => {{
+      parts.push(document.createElement('br'));
+      parts.push(document.createTextNode(`${{k}}: ${{v}}`));
+    }});
+    tooltip.replaceChildren(...parts);
     tooltip.style.opacity = 1;
     moveTip(ev);
   }}

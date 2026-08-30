@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import xml.dom.minidom as minidom
 
-from stackscan.export import to_html, to_json, to_xml
+from stackscan.export import build_graph, to_html, to_json, to_xml
 
 _PAYLOAD = {
     "scanner": "stackscan",
@@ -124,3 +124,37 @@ def test_to_html_includes_whois_fields() -> None:
     assert "https://example.com" in out
     assert "ns1.example.com" in out
     assert "signed" in out
+
+
+def test_html_graph_json_escapes_script_terminator() -> None:
+    payload = {
+        "scanner": "stackscan",
+        "version": "9.9.9",
+        "generated_at": "2026-07-13T00:00:00Z",
+        "elapsed_seconds": 0.1,
+        "results": [
+            {
+                "url": "https://a.test",
+                "final_url": "https://a.test",
+                "status": 200,
+                "ports": {
+                    "scanner": "nmap",
+                    "ports": [
+                        {
+                            "port": 22,
+                            "protocol": "tcp",
+                            "host": "1.2.3.4",
+                            "service": "ssh",
+                            "product": "</script><img src=x onerror=alert(1)>",
+                        }
+                    ],
+                },
+                "subdomains": [{"name": "a.a.test", "addresses": ["1.2.3.4"]}],
+            }
+        ],
+    }
+    payload["graph"] = build_graph(payload["results"])
+    out = to_html(payload)
+    assert "</script><img" not in out
+    assert "\\u003c/script\\u003e" in out
+    assert "innerHTML" not in out
