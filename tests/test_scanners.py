@@ -64,7 +64,7 @@ def test_detect_isp_block_by_location_header() -> None:
 
 def test_scan_secrets_finds_aws_key_and_jwt() -> None:
     body = (
-        'apiKey = "AKIAIOSFODNN7EXAMPLE"\n'
+        'apiKey = "AKIAZ4XORKN2QVWD7PLR"\n'
         'token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"\n'
     )
     findings = scan_secrets(body, location="https://x.test")
@@ -75,10 +75,19 @@ def test_scan_secrets_finds_aws_key_and_jwt() -> None:
 
 
 def test_scan_secrets_redacts_value() -> None:
-    body = 'apiKey = "AKIAIOSFODNN7EXAMPLE"'
+    body = 'apiKey = "AKIAZ4XORKN2QVWD7PLR"'
     finding = scan_secrets(body)[0]
-    assert finding.value != "AKIAIOSFODNN7EXAMPLE"
+    assert finding.value != "AKIAZ4XORKN2QVWD7PLR"
     assert "..." in finding.value
+
+
+def test_scan_secrets_ignores_documentation_placeholders() -> None:
+    body = (
+        'aws = "AKIAIOSFODNN7EXAMPLE"\n'
+        "url = postgres://user:password@localhost:5432/example_db\n"
+        'api_key = "YOUR_API_KEY_HERE_1234567"\n'
+    )
+    assert scan_secrets(body) == []
 
 
 def test_takeover_service_for_github_pages_cname() -> None:

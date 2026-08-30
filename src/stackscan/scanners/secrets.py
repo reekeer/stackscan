@@ -81,6 +81,29 @@ def _redact(value: str, keep: int = 6) -> str:
     return f"{value[:keep]}...{value[-keep:]}"
 
 
+_PLACEHOLDER_MARKERS: tuple[str, ...] = (
+    "example",
+    "your_",
+    "_here",
+    "changeme",
+    "placeholder",
+    "redacted",
+    "dummy",
+    "sample",
+    "xxxx",
+    "<",
+)
+
+
+def _is_placeholder(value: str) -> bool:
+    """Filter well-known documentation placeholders (e.g. AWS's AKIA...EXAMPLE)."""
+    lowered = value.lower()
+    if any(marker in lowered for marker in _PLACEHOLDER_MARKERS):
+        return True
+    stripped = value.strip("*")
+    return len(set(stripped)) <= 1
+
+
 def scan_secrets(body: str, location: str = "") -> list[SecretFinding]:
     """Return probable secret leaks found in the response body."""
     seen: set[tuple[str, str]] = set()
@@ -89,7 +112,7 @@ def scan_secrets(body: str, location: str = "") -> list[SecretFinding]:
         for match in pattern.regex.finditer(body):
             value = match.group(1) if pattern.regex.groups else match.group(0)
             value = value.strip()
-            if len(value) < 4:
+            if len(value) < 4 or _is_placeholder(value):
                 continue
             key = (pattern.name, value)
             if key in seen:
