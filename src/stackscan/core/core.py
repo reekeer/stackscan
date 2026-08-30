@@ -8,6 +8,8 @@ from aiohttp import ClientSession, ClientTimeout
 from stackscan.net.resolver import build_connector
 from stackscan.types import FetchResult
 
+_MAX_DRAIN_BYTES = 4 * 1024 * 1024
+
 
 def _lower_headers(items: Iterable[tuple[str, str]]) -> dict[str, str]:
     return {key.lower(): value for key, value in items}
@@ -67,8 +69,12 @@ class StackscanSession:
             cookies = resp.headers.getall("Set-Cookie", [])
             charset = _charset(resp.charset)
             body_bytes = await resp.content.read(max_bytes)
-            while await resp.content.read(8192):
-                pass
+            drained = 0
+            while drained < _MAX_DRAIN_BYTES:
+                chunk = await resp.content.read(8192)
+                if not chunk:
+                    break
+                drained += len(chunk)
             body = body_bytes.decode(charset, errors="replace")
             url_final = str(resp.url)
             version = resp.version
