@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.3] - 2026-08-30
+
+### Fixed
+
+- **HTTP services are fingerprinted in the pure-Python scan again.** The connect scanner sanitised every banner before matching, which stripped the CRLFs the `^Server:` header regex depends on, so the no-nmap fallback never named a web service or its version. HTTP and RTSP probes now keep the raw response, so `--ports` without nmap identifies `nginx`, `Apache` and friends — and matches their CVEs — as the nmap path does.
+- **nmap `extrainfo` no longer pollutes the version.** A memcached uptime or an Apache `(Unix)` build tag was folded straight into the version string (`1.6.45 (uptime 490 seconds)`), so it showed in the report and was fed to CVE matching. The version is kept clean.
+- **Imprecise nmap versions no longer invent CVEs.** When nmap reports something like `6.1 or later`, it is a lower bound, not a version — matching it as `6.1` flagged a MongoDB 7.x server with CVEs it does not have. Such values are shown but excluded from CVE matching.
+- **Version numbers mentioned in page prose are downweighted.** A blog line like "we migrated off Apache 2.4.49" was treated as a live banner and produced dozens of high-confidence CVEs. A bare `name version` scrape is now low-confidence and hidden at the default threshold; the `name/version` server-footer form stays authoritative.
+- **A "powered by" version is dropped when it belongs to another product.** "powered by coffee and jQuery 1.12.4" no longer records `coffee 1.12.4`.
+- **Exposure findings validate content.** A server that answers `200` to every path no longer reports `robots.txt`, `sitemap.xml` and `security.txt` as exposed — each must actually look like the file it claims to be.
+- **Documentation placeholders are not reported as secrets.** Well-known non-secrets such as AWS's `AKIA…EXAMPLE` key or `YOUR_API_KEY_HERE` are filtered out.
+- **Secret findings keep the port** in their location (`127.0.0.1:9000`, not `127.0.0.1`).
+
 ## [2.7.2] - 2026-08-30
 
 ### Added
